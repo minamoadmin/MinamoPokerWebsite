@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minamo Poker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        .splash {
+            width: 100%;
+            max-width: 500px;
+            margin-bottom: 48px;
+        }
+
+        .splash img {
+            width: 100%;
+            height: auto;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 24px;
+            align-items: flex-start;
+            margin-bottom: 48px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .store-badge {
+            height: 54px;
+            width: auto;
+            transition: opacity 0.2s;
+        }
+
+        .store-badge:hover {
+            opacity: 0.8;
+        }
+
+        .android-group {
+            opacity: 0.35;
+        }
+
+        .android-group .store-badge {
+            cursor: default;
+            filter: grayscale(100%);
+        }
+
+        .android-group .store-badge:hover {
+            opacity: 1;
+        }
+
+        .under-dev {
+            font-size: 12px;
+            color: #888;
+            letter-spacing: 0.5px;
+        }
+
+        .contact {
+            font-size: 14px;
+        }
+
+        .contact a {
+            color: #aaa;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .contact a:hover {
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="splash">
+            <img src="splash.svg" alt="Minamo Poker">
+        </div>
+
+        <div class="buttons">
+            <div class="button-group">
+                <a href="https://apps.apple.com/app/id1518356362" target="_blank" rel="noopener">
+                    <img class="store-badge" alt="Download on the App Store" src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg">
+                </a>
+            </div>
+
+            <div class="button-group android-group">
+                <img class="store-badge" alt="Get it on Google Play" src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg">
+                <span class="under-dev">Under Development</span>
+            </div>
+        </div>
+
+        <div class="contact">
+            <a href="mailto:support@minamo.co">Contact Us</a>
+        </div>
+    </div>
+</body>
+</html>
