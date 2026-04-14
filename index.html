@@ -15,11 +15,60 @@
             background-color: #000;
             color: #fff;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .border-frame {
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            right: 12px;
+            bottom: 12px;
+            border: 1px solid #fff;
+            border-radius: 5px;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            padding: 40px 20px;
+            padding: 20px;
+        }
+
+        /* Corner angles */
+        .border-frame::before,
+        .border-frame::after,
+        .corner-bl::before,
+        .corner-br::before {
+            content: '';
+            position: absolute;
+            width: 44px;
+            height: 44px;
+            border-color: #fff;
+            border-style: solid;
+        }
+
+        .border-frame::before {
+            top: 8px;
+            left: 8px;
+            border-width: 1px 0 0 1px;
+        }
+
+        .border-frame::after {
+            top: 8px;
+            right: 8px;
+            border-width: 1px 1px 0 0;
+        }
+
+        .corner-bl::before {
+            bottom: 8px;
+            left: 8px;
+            border-width: 0 0 1px 1px;
+        }
+
+        .corner-br::before {
+            bottom: 8px;
+            right: 8px;
+            border-width: 0 1px 1px 0;
         }
 
         .container {
@@ -28,15 +77,17 @@
             align-items: center;
             max-width: 600px;
             width: 100%;
+            flex: 1;
+            justify-content: center;
         }
 
-        .splash {
+        .logo {
             width: 100%;
-            max-width: 500px;
-            margin-bottom: 48px;
+            max-width: 400px;
+            margin-bottom: 40px;
         }
 
-        .splash img {
+        .logo img {
             width: 100%;
             height: auto;
         }
@@ -45,7 +96,7 @@
             display: flex;
             gap: 24px;
             align-items: flex-start;
-            margin-bottom: 48px;
+            margin-bottom: 40px;
             flex-wrap: wrap;
             justify-content: center;
         }
@@ -86,44 +137,84 @@
             letter-spacing: 0.5px;
         }
 
-        .contact {
+        .footer {
             font-size: 14px;
-            text-align: center;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding-bottom: 4px;
         }
 
-        .contact a {
+        .footer a {
             color: #aaa;
             text-decoration: none;
             transition: color 0.2s;
         }
 
-        .contact a:hover {
+        .footer a:hover {
             color: #fff;
+        }
+
+        .footer .dot {
+            color: #aaa;
+            font-size: 6px;
+        }
+
+        @media (max-height: 500px) {
+            .logo {
+                max-width: 250px;
+                margin-bottom: 20px;
+            }
+            .buttons {
+                margin-bottom: 20px;
+            }
+            .store-badge {
+                height: 40px;
+            }
+        }
+
+        @media (max-width: 400px) {
+            .logo {
+                max-width: 280px;
+                margin-bottom: 24px;
+            }
+            .buttons {
+                gap: 16px;
+                margin-bottom: 24px;
+            }
+            .store-badge {
+                height: 44px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="splash">
-            <img src="splash.svg" alt="Minamo Poker">
-        </div>
+    <div class="border-frame">
+        <div class="corner-bl"></div>
+        <div class="corner-br"></div>
 
-        <div class="buttons">
-            <div class="button-group">
-                <a href="https://apps.apple.com/app/id1518356362" target="_blank" rel="noopener">
-                    <img class="store-badge" alt="Download on the App Store" src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg">
-                </a>
+        <div class="container">
+            <div class="logo">
+                <img src="logo.svg" alt="Minamo Poker">
             </div>
 
-            <div class="button-group android-group">
-                <img class="store-badge" alt="Get it on Google Play" src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg">
-                <span class="under-dev">Under Development</span>
+            <div class="buttons">
+                <div class="button-group">
+                    <a href="https://apps.apple.com/app/id1518356362" target="_blank" rel="noopener">
+                        <img class="store-badge" alt="Download on the App Store" src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg">
+                    </a>
+                </div>
+
+                <div class="button-group android-group">
+                    <img class="store-badge" alt="Get it on Google Play" src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg">
+                    <span class="under-dev">Coming Soon</span>
+                </div>
             </div>
         </div>
 
-        <div class="contact">
+        <div class="footer">
             <a href="mailto:support@minamo.co">Contact Us</a>
-            <br>
+            <span class="dot">&#9679;</span>
             <a href="/privacy.html">Privacy Policy</a>
         </div>
     </div>
