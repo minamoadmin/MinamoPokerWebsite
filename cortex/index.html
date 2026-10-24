@@ -582,9 +582,151 @@
         gap: 4px;
       }
     }
+
+    /* Full-Screen Auth Gate: Hide entire portal shell when locked */
+    body[data-auth="locked"] .topbar,
+    body[data-auth="locked"] .nav-tabs,
+    body[data-auth="locked"] main.container,
+    body[data-auth="locked"] .drawer-backdrop {
+      display: none !important;
+    }
+    body[data-auth="unlocked"] #authGateScreen {
+      display: none !important;
+    }
+    #authGateScreen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background:
+        radial-gradient(circle at 50% 15%, rgba(56, 189, 248, 0.14), transparent 50%),
+        radial-gradient(circle at 80% 85%, rgba(99, 102, 241, 0.10), transparent 45%),
+        #06090f;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      overflow-y: auto;
+    }
+    .auth-gate-card {
+      width: 100%;
+      max-width: 430px;
+      background: rgba(15, 22, 35, 0.94);
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      border-radius: 20px;
+      padding: 36px 32px 30px;
+      box-shadow: 0 28px 70px rgba(0, 0, 0, 0.75), 0 0 40px rgba(14, 165, 233, 0.08);
+      backdrop-filter: blur(16px);
+    }
+    .auth-gate-logo {
+      width: 54px;
+      height: 54px;
+      border-radius: 15px;
+      background: linear-gradient(135deg, #38bdf8, #6366f1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 24px;
+      color: #fff;
+      margin: 0 auto 16px;
+      box-shadow: 0 8px 24px rgba(56, 189, 248, 0.32);
+    }
+    .auth-gate-env-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      background: #080c14;
+      padding: 4px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      margin-bottom: 18px;
+    }
+    .auth-gate-env-btn {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      padding: 9px 10px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      transition: all 0.15s ease;
+    }
+    .auth-gate-env-btn.active {
+      background: #172235;
+      color: var(--text);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    .auth-gate-input-wrap {
+      position: relative;
+      margin-bottom: 18px;
+    }
+    .auth-gate-input {
+      width: 100%;
+      padding: 13px 64px 13px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #080c14;
+      color: var(--text);
+      font-size: 14px;
+      font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .auth-gate-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    }
+    .auth-gate-eye-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .auth-gate-submit {
+      width: 100%;
+      padding: 13px 18px;
+      border-radius: 10px;
+      border: 1px solid #38bdf8;
+      background: linear-gradient(135deg, #0284c7, #2563eb);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 6px 20px rgba(2, 132, 199, 0.35);
+      transition: filter 0.15s ease, transform 0.1s ease;
+    }
+    .auth-gate-submit:hover {
+      filter: brightness(1.08);
+    }
+    .auth-gate-submit:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
   </style>
 </head>
-<body data-env="production">
+<body data-env="staging" data-auth="locked">
+
+  <!-- Full-Screen Dedicated Login Gate (Only thing visible when locked) -->
+  <div id="authGateScreen">
+    <div class="auth-gate-card" id="authGateCard"></div>
+  </div>
 
   <!-- Persistent Top Context Bar -->
   <header class="topbar">
@@ -778,7 +920,7 @@
 
     async function fetchEdgeSnapshot(forceRefresh = false) {
       if (!state.ownerKey) {
-        state.edgeLastError = 'Enter your Cortex Owner Master Key to connect to the Supabase Edge Gate.';
+        state.edgeLastError = null;
         return null;
       }
       if (!forceRefresh && state.edgeSnapCache && state.edgeSnapEnv === `${state.environment}:${state.windowHours}`) {
@@ -1161,40 +1303,110 @@
       return { spans };
     }
 
-    function renderEdgeGateAuthPrompt(root) {
-      root.innerHTML = `
-        <div class="panel-card" style="max-width:520px;margin:40px auto;border-color:rgba(56,189,248,0.4);">
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
-            <div class="brand-logo">C</div>
-            <div>
-              <div class="panel-title">Minamo Cortex · Supabase Edge Gate</div>
-              <div class="panel-subtitle">Direct serverless connection to ${escapeHtml(state.environment.toUpperCase())} (${escapeHtml(getEdgeUrl(state.environment))})</div>
-            </div>
+    let authKeyVisible = false;
+    let authVerifying = false;
+
+    function setPortalUnlocked(unlocked) {
+      document.body.setAttribute('data-auth', unlocked ? 'unlocked' : 'locked');
+      if (!unlocked) {
+        renderEdgeGateAuthPrompt();
+      }
+    }
+
+    function toggleAuthKeyVisibility() {
+      authKeyVisible = !authKeyVisible;
+      const input = document.getElementById('inlineOwnerKeyInput');
+      const btn = document.getElementById('authKeyEyeBtn');
+      if (input) input.type = authKeyVisible ? 'text' : 'password';
+      if (btn) btn.textContent = authKeyVisible ? 'Hide' : 'Show';
+    }
+
+    function selectAuthGateEnv(env) {
+      const currentInputVal = document.getElementById('inlineOwnerKeyInput')?.value || state.ownerKey;
+      state.environment = env;
+      localStorage.setItem('cortex_env', env);
+      state.edgeSnapCache = null;
+      state.edgeLastError = null;
+      syncEnvButtonsUI();
+      renderEdgeGateAuthPrompt(currentInputVal);
+    }
+
+    function renderEdgeGateAuthPrompt(preservedKey) {
+      const card = document.getElementById('authGateCard');
+      if (!card) return;
+      const keyVal = preservedKey !== undefined ? preservedKey : state.ownerKey;
+      card.innerHTML = `
+        <div style="text-align:center;margin-bottom:24px;">
+          <div class="auth-gate-logo">C</div>
+          <h1 style="font-size:22px;font-weight:800;letter-spacing:-0.02em;color:var(--text);margin-bottom:6px;">Minamo Cortex</h1>
+          <div style="font-size:13px;color:var(--muted);">Restricted Owner Portal · Enter Master Key to Unlock</div>
+        </div>
+
+        ${state.edgeLastError ? `
+          <div style="background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.35);color:#fda4af;padding:11px 13px;border-radius:10px;font-size:12px;margin-bottom:18px;line-height:1.45;">
+            ${escapeHtml(state.edgeLastError)}
           </div>
-          ${state.edgeLastError ? `<div style="background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.35);color:#fda4af;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:14px;">${escapeHtml(state.edgeLastError)}</div>` : ''}
-          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Target Environment</label>
-          <div style="display:flex;gap:8px;margin-bottom:14px;">
-            <button type="button" class="btn ${state.environment === 'staging' ? 'primary' : ''}" onclick="setEnvironment('staging')" style="flex:1;justify-content:center;">
-              <span class="env-dot staging"></span> STAGING (nxjxcqdf...)
-            </button>
-            <button type="button" class="btn ${state.environment === 'production' ? 'primary' : ''}" onclick="setEnvironment('production')" style="flex:1;justify-content:center;">
-              <span class="env-dot prod"></span> PRODUCTION (qfadvsuv...)
-            </button>
-          </div>
-          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Owner Master Key (CORTEX_OWNER_KEY)</label>
-          <input id="inlineOwnerKeyInput" type="password" value="${escapeHtml(state.ownerKey)}" placeholder="Enter your CORTEX_OWNER_KEY..." onkeydown="if(event.key==='Enter')saveEdgeGateKeyFromInline()" style="width:100%;padding:11px 13px;border-radius:8px;border:1px solid var(--border);background:#080c14;color:var(--text);font-size:14px;margin-bottom:14px;" />
-          <div style="display:flex;gap:10px;justify-content:flex-end;">
-            <button class="btn primary" onclick="saveEdgeGateKeyFromInline()">Unlock & Connect</button>
-          </div>
+        ` : ''}
+
+        <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:7px;">Environment</label>
+        <div class="auth-gate-env-toggle">
+          <button type="button" class="auth-gate-env-btn ${state.environment === 'staging' ? 'active' : ''}" onclick="selectAuthGateEnv('staging')">
+            <span class="env-dot staging"></span> Staging
+          </button>
+          <button type="button" class="auth-gate-env-btn ${state.environment === 'production' ? 'active' : ''}" onclick="selectAuthGateEnv('production')">
+            <span class="env-dot prod"></span> Production
+          </button>
+        </div>
+
+        <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:7px;">Owner Master Key</label>
+        <div class="auth-gate-input-wrap">
+          <input
+            id="inlineOwnerKeyInput"
+            class="auth-gate-input"
+            type="${authKeyVisible ? 'text' : 'password'}"
+            value="${escapeHtml(keyVal)}"
+            placeholder="mcx_owner_..."
+            autocomplete="current-password"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            onkeydown="if(event.key==='Enter')saveEdgeGateKeyFromInline()"
+          />
+          <button type="button" id="authKeyEyeBtn" class="auth-gate-eye-btn" onclick="toggleAuthKeyVisibility()">
+            ${authKeyVisible ? 'Hide' : 'Show'}
+          </button>
+        </div>
+
+        <button type="button" id="authGateSubmitBtn" class="auth-gate-submit" onclick="saveEdgeGateKeyFromInline()" ${authVerifying ? 'disabled' : ''}>
+          ${authVerifying ? 'Verifying Key...' : 'Unlock Portal →'}
+        </button>
+
+        <div style="text-align:center;margin-top:18px;font-size:11px;color:var(--muted);opacity:0.8;">
+          Protected by SHA-256 Edge Gate · Zero public exposure
         </div>
       `;
     }
 
     async function saveEdgeGateKeyFromInline() {
       const val = document.getElementById('inlineOwnerKeyInput')?.value?.trim() || '';
+      if (!val) {
+        state.edgeLastError = 'Please enter your Cortex Owner Master Key.';
+        renderEdgeGateAuthPrompt('');
+        return;
+      }
+      authVerifying = true;
+      state.edgeLastError = null;
+      renderEdgeGateAuthPrompt(val);
       state.ownerKey = val;
       localStorage.setItem('cortex_owner_key', val);
       state.edgeSnapCache = null;
+      const snap = await fetchEdgeSnapshot(true);
+      authVerifying = false;
+      if (!snap) {
+        renderEdgeGateAuthPrompt(val);
+        return;
+      }
+      setPortalUnlocked(true);
       await loadVersions();
       await refreshActiveTab();
     }
@@ -1331,9 +1543,10 @@
       if (state.dataSource === 'edge') {
         const snap = await fetchEdgeSnapshot();
         if (!snap) {
-          renderEdgeGateAuthPrompt(root);
+          setPortalUnlocked(false);
           return;
         }
+        setPortalUnlocked(true);
         const issues = filterRowsByState(snap.issues, false);
         const reports = filterRowsByState(snap.bug_reports, false).map(r => ({
           ...r,
@@ -2331,6 +2544,7 @@
     // Auto-detect Local Node Server vs Static/PWA Edge Gate Mode on startup
     async function initPortal() {
       syncEnvButtonsUI();
+      renderEdgeGateAuthPrompt();
       if (state.dataSource === 'auto') {
         try {
           const healthRes = await fetch('/api/health', { cache: 'no-store' });
@@ -2351,9 +2565,12 @@
             state.ownerKey = '';
             localStorage.removeItem('cortex_owner_key');
             state.edgeSnapCache = null;
-            refreshActiveTab();
+            state.edgeLastError = null;
+            setPortalUnlocked(false);
           };
         }
+      } else {
+        setPortalUnlocked(true);
       }
       await loadVersions();
       await refreshActiveTab();
