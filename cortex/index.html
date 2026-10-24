@@ -741,9 +741,9 @@
     <div class="context-controls">
       <!-- Environment Selector -->
       <div class="segmented" id="envSelector">
-        <button data-env="production" class="active"><span class="env-dot prod"></span>PRODUCTION</button>
+        <button data-env="production"><span class="env-dot prod"></span>PRODUCTION</button>
         <button data-env="staging"><span class="env-dot staging"></span>STAGING</button>
-        <button data-env="local"><span class="env-dot local"></span>LOCAL</button>
+        <button data-env="demo" class="active"><span class="env-dot local"></span>🧪 DEMO</button>
       </div>
 
       <!-- Platform Selector -->
@@ -836,23 +836,23 @@
     };
 
     const ALL_HOME_PANELS_META = {
-      casual: { label: 'Casual Matchmaking', group: 'Core Gameplay' },
-      ranked: { label: 'Ranked Competitive', group: 'Core Gameplay' },
-      tournament: { label: 'Tournaments', group: 'Core Gameplay' },
-      store: { label: 'Store & Chips', group: 'Economy & Cosmetics' },
-      deck: { label: 'Deck & Skins', group: 'Economy & Cosmetics' },
-      editProfile: { label: 'Character & Expressions', group: 'Economy & Cosmetics' },
-      stats: { label: 'Player Statistics', group: 'Progression & Social' },
-      leaderboards: { label: 'Leaderboards', group: 'Progression & Social' },
-      career: { label: 'Career & Achievements', group: 'Progression & Social' },
-      friends: { label: 'Friends & Social', group: 'Progression & Social' },
-      inbox: { label: 'Player Inbox & Gifts', group: 'Progression & Social' },
-      pokerSchool: { label: 'Poker School', group: 'Utility & Learning' },
-      settings: { label: 'Settings', group: 'Utility & Learning' },
+      casual: { label: 'Casual Lobby', group: 'Game Modes' },
+      ranked: { label: 'Ranked Lobby', group: 'Game Modes' },
+      tournament: { label: 'Weekly Tourney', group: 'Game Modes' },
+      spin: { label: 'Daily Spin Wheel', group: 'Economy & Rewards' },
+      store: { label: 'Chip & Token Store', group: 'Economy & Rewards' },
+      deck: { label: 'Deck & Frame Skins', group: 'Cosmetics' },
+      characterSetup: { label: 'Character & Expressions', group: 'Cosmetics' },
+      gameSummary: { label: 'Post-Game Summary', group: 'Game Modes' },
+      chipHistory: { label: 'Chip Value History', group: 'Stats & History' },
+      rankHistory: { label: 'Rank Value History', group: 'Stats & History' },
+      levelHistory: { label: 'Level XP History', group: 'Stats & History' },
+      profile: { label: 'Player Profile & Link', group: 'Account & Config' },
+      settings: { label: 'Audio & Haptic Settings', group: 'Account & Config' },
     };
 
     const state = {
-      environment: localStorage.getItem('cortex_env') || 'staging',
+      environment: localStorage.getItem('cortex_active_env_v2') || 'demo',
       platform: 'all',
       appVersion: 'all',
       compareVersion: 'all',
@@ -867,10 +867,396 @@
       edgeSnapCache: null,
       edgeSnapEnv: null,
       edgeLastError: null,
+      demoKeyVerified: false,
+      demoSnapCache: null,
     };
 
+    function buildDemoSnapshot() {
+      const now = Date.now();
+      const isoAgo = (mins) => new Date(now - mins * 60 * 1000).toISOString();
+      const sessions = [];
+      const product_events = [];
+      const performance_spans = [];
+
+      const panelProfiles = [
+        { panel: 'casual', openProb: 0.78, avgDwellMs: 14200, interactProb: 0.88 },
+        { panel: 'ranked', openProb: 0.64, avgDwellMs: 18500, interactProb: 0.82 },
+        { panel: 'spin', openProb: 0.71, avgDwellMs: 11800, interactProb: 0.92 },
+        { panel: 'characterSetup', openProb: 0.54, avgDwellMs: 26400, interactProb: 0.79 },
+        { panel: 'gameSummary', openProb: 0.68, avgDwellMs: 8900, interactProb: 0.74 },
+        { panel: 'tournament', openProb: 0.42, avgDwellMs: 15100, interactProb: 0.61 },
+        { panel: 'store', openProb: 0.38, avgDwellMs: 19300, interactProb: 0.52 },
+        { panel: 'deck', openProb: 0.35, avgDwellMs: 21000, interactProb: 0.68 },
+        { panel: 'profile', openProb: 0.24, avgDwellMs: 9400, interactProb: 0.55 },
+        { panel: 'settings', openProb: 0.19, avgDwellMs: 6200, interactProb: 0.64 },
+        { panel: 'rankHistory', openProb: 0.16, avgDwellMs: 5100, interactProb: 0.38 },
+        { panel: 'chipHistory', openProb: 0.11, avgDwellMs: 4200, interactProb: 0.31 },
+        { panel: 'levelHistory', openProb: 0.06, avgDwellMs: 2800, interactProb: 0.19 },
+      ];
+      const characters = ['anya', 'amara', 'brutus', 'lenny'];
+      const charWeights = [0.36, 0.28, 0.20, 0.16];
+      const exprSets = ['default', 'set1', 'set2', 'spades', 'hearts', 'diamonds', 'clubs'];
+      const exprWeights = [0.28, 0.21, 0.15, 0.13, 0.10, 0.07, 0.06];
+      const pickWeighted = (items, weights, seed) => {
+        const r = ((seed * 9301 + 49297) % 233280) / 233280;
+        let acc = 0;
+        for (let i = 0; i < items.length; i++) {
+          acc += weights[i];
+          if (r <= acc) return items[i];
+        }
+        return items[0];
+      };
+
+      const totalDemoSessions = 140;
+      for (let i = 0; i < totalDemoSessions; i++) {
+        const isIos = i % 2 === 0 || i % 5 === 0;
+        const platform = isIos ? 'ios' : 'android';
+        const app_version = i < 108 ? '2.0.2' : '2.0.1';
+        const user_id = `player-${(i % 78) + 1}`;
+        const install_id = `inst-${platform}-${user_id}`;
+        const session_id = `sess-demo-${i + 1}`;
+        const minsAgo = Math.floor((i / totalDemoSessions) * 14 * 24 * 60) + 4;
+        const started_at = isoAgo(minsAgo);
+        const isCrashed = (app_version === '2.0.1' && (i === 115 || i === 128)) || (app_version === '2.0.2' && i === 19);
+        const hasError = isCrashed || i % 18 === 0;
+        const duration_ms = (app_version === '2.0.2' ? 380000 : 320000) + ((i * 43000) % 540000);
+
+        sessions.push({
+          session_id,
+          environment: 'demo',
+          platform,
+          app_version,
+          user_id,
+          install_id,
+          status: isCrashed ? 'crashed' : 'ended',
+          started_at,
+          duration_ms,
+          errors_count: isCrashed ? 2 : hasError ? 1 : 0,
+        });
+
+        const coldStartMs = (app_version === '2.0.2' ? 410 : 545) + (isIos ? 0 : 75) + (i % 9) * 28;
+        performance_spans.push({
+          session_id,
+          environment: 'demo',
+          platform,
+          app_version,
+          name: 'app.cold_start',
+          duration_ms: coldStartMs,
+          status: 'ok',
+          created_at: started_at,
+        });
+
+        const pushEv = (name, properties) => {
+          product_events.push({
+            session_id,
+            environment: 'demo',
+            platform,
+            app_version,
+            user_id,
+            install_id,
+            name,
+            properties,
+            event_ts: started_at,
+            created_at: started_at,
+          });
+        };
+
+        if (i % 28 !== 27) {
+          pushEv('preload.completed', { durationMs: 640 + (i % 7) * 80 });
+          performance_spans.push({
+            session_id, environment: 'demo', platform, app_version,
+            name: 'preload.critical', duration_ms: 640 + (i % 7) * 80, status: 'ok', created_at: started_at,
+          });
+
+          if (i % 22 !== 21) {
+            pushEv('auth.completed', { method: i % 3 === 0 ? 'apple' : 'google' });
+            pushEv('scene.viewed', { scene: 'home', previousScene: 'landing' });
+
+            for (let pIdx = 0; pIdx < panelProfiles.length; pIdx++) {
+              const prof = panelProfiles[pIdx];
+              const pseudo = ((i * 31 + pIdx * 17) % 100) / 100;
+              if (pseudo < prof.openProb) {
+                const dwellMs = Math.round(prof.avgDwellMs * (0.7 + ((i * 13 + pIdx * 7) % 60) / 100));
+                const interacted = ((i * 19 + pIdx * 23) % 100) / 100 < prof.interactProb;
+                pushEv('panel.opened', { panel: prof.panel });
+                pushEv('panel.closed', { panel: prof.panel, dwellMs, interacted });
+              }
+            }
+
+            if (i % 2 === 0) {
+              const charId = pickWeighted(characters, charWeights, i + 7);
+              const setKey = pickWeighted(exprSets, exprWeights, i * 3 + 11);
+              pushEv('character.selected', { characterId: charId });
+              pushEv('character.expression_changed', { characterId: charId, setKey });
+              pushEv('store.item_previewed', { itemType: 'character', characterId: charId, itemId: `${charId}_${setKey}` });
+              if (i % 6 === 0) {
+                pushEv('store.purchase_completed', { itemType: 'character', characterId: charId, itemId: `${charId}_${setKey}` });
+              } else if (i % 10 === 0) {
+                pushEv('store.purchase_abandoned', { itemType: 'character', characterId: charId, itemId: `${charId}_${setKey}` });
+              }
+            }
+            if (i % 14 === 0) {
+              pushEv('economy.insufficient_funds', { source: 'table_buyin', requiredAmount: 50000 });
+            }
+
+            if (i % 10 < 8) {
+              const mode = i % 5 === 0 ? 'tourney' : i % 3 === 0 ? 'ranked' : 'casual';
+              const waitMs = mode === 'casual' ? 2200 + (i % 5) * 700 : mode === 'ranked' ? 4900 + (i % 6) * 1200 : 7800 + (i % 7) * 1500;
+              pushEv('queue.joined', { mode, stakeId: 'low' });
+              const cancelled = (mode === 'tourney' && i % 15 === 0) || (mode === 'ranked' && i % 18 === 0) || (mode === 'casual' && i % 25 === 0);
+              if (cancelled) {
+                pushEv('queue.cancelled', { mode, waitMs: waitMs + 6000 });
+              } else {
+                const hasAiBots = mode === 'casual' ? i % 3 === 0 : i % 5 === 0;
+                pushEv('queue.matched', { mode, waitMs, hasAiBots });
+                pushEv('scene.viewed', { scene: mode === 'casual' ? 'casualGame' : 'rankedGame' });
+                const handsPlayed = 4 + (i % 9);
+                const reason = i % 11 === 0 ? 'busted_chips' : i % 17 === 0 ? 'timeout_kicked' : i % 23 === 0 ? 'disconnected' : 'voluntary';
+                pushEv('table.left', { mode, reason, handsPlayed });
+                if (i % 9 === 0) pushEv('turn.timeout', { mode });
+                if (i % 16 === 0) {
+                  pushEv('realtime.disconnected', { channel: `${mode}_table` });
+                  pushEv('realtime.state_fallback', { channel: `${mode}_table` });
+                }
+                performance_spans.push({
+                  session_id, environment: 'demo', platform, app_version,
+                  name: mode === 'casual' ? 'edge.process-casual-action' : 'edge.process-ranked-action',
+                  duration_ms: 135 + (i % 8) * 26, status: i % 35 === 0 ? 'error' : 'ok', created_at: started_at,
+                });
+                performance_spans.push({
+                  session_id, environment: 'demo', platform, app_version,
+                  name: 'realtime.connect', duration_ms: 190 + (i % 6) * 32, status: 'ok', created_at: started_at,
+                });
+                performance_spans.push({
+                  session_id, environment: 'demo', platform, app_version,
+                  name: 'edge.settle-casual-hand', duration_ms: 165 + (i % 7) * 24, status: 'ok', created_at: started_at,
+                });
+                if (i % 2 === 0) {
+                  pushEv('game_summary.action', { mode, exitChoice: i % 4 === 0 ? 'dismiss' : 'play_again' });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const issues = [
+        {
+          id: 101,
+          environment: 'demo',
+          platform: 'android',
+          category: 'CasualGame',
+          title: '[CasualGame] Action failed after 3 attempts: timeout waiting for edge response',
+          fingerprint_key: 'log-error::CasualGame::Action failed after <n> attempts: timeout waiting for edge response',
+          is_fatal: false,
+          status: 'regressed',
+          first_seen_version: '2.0.1',
+          last_seen_version: '2.0.2',
+          events_count: 14,
+          affected_users_count: 6,
+          first_seen_at: isoAgo(1800),
+          last_seen_at: isoAgo(14),
+        },
+        {
+          id: 102,
+          environment: 'demo',
+          platform: 'ios',
+          category: 'Realtime',
+          title: '[Realtime] Channel subscription gave up after 5 attempts on ranked_cards:<id>',
+          fingerprint_key: 'log-error::Realtime::Channel subscription gave up after <n> attempts on ranked_cards:<id>',
+          is_fatal: false,
+          status: 'unresolved',
+          first_seen_version: '2.0.2',
+          last_seen_version: '2.0.2',
+          events_count: 8,
+          affected_users_count: 4,
+          first_seen_at: isoAgo(720),
+          last_seen_at: isoAgo(38),
+        },
+        {
+          id: 103,
+          environment: 'demo',
+          platform: 'ios',
+          category: 'AudioEngine',
+          title: 'AVAudioEngine route change crash when AirPods disconnect mid-deal animation',
+          fingerprint_key: 'crash::AudioEngine::AVAudioSessionRouteChangeNotification::MPAudioManager.swift:192',
+          is_fatal: true,
+          status: 'unresolved',
+          first_seen_version: '2.0.1',
+          last_seen_version: '2.0.2',
+          events_count: 3,
+          affected_users_count: 3,
+          first_seen_at: isoAgo(2400),
+          last_seen_at: isoAgo(95),
+        },
+        {
+          id: 104,
+          environment: 'demo',
+          platform: 'backend',
+          category: 'scheduler-tick',
+          title: '[scheduler-tick] oldest unclaimed due_work row exceeded 15s threshold (16.4s)',
+          fingerprint_key: 'ops-alert::scheduler-tick::oldest unclaimed due_work row exceeded 15s threshold',
+          is_fatal: false,
+          status: 'resolved',
+          first_seen_version: '1.70.0',
+          last_seen_version: '1.71.0',
+          events_count: 2,
+          affected_users_count: 1,
+          first_seen_at: isoAgo(1200),
+          last_seen_at: isoAgo(110),
+        },
+      ];
+
+      const error_events = [
+        {
+          id: 501,
+          issue_id: 101,
+          session_id: 'sess-demo-2',
+          environment: 'demo',
+          platform: 'android',
+          app_version: '2.0.2',
+          level: 'error',
+          is_fatal: false,
+          category: 'CasualGame',
+          message: '[CasualGame] Action failed after 3 attempts: timeout waiting for edge response',
+          mapping_uuid: 'a233cc87-5e16-3b06-90d7-b8f9708057bd',
+          stacktrace: 'java.net.SocketTimeoutException: timeout waiting for edge response\n    at d.e.f.a(SourceFile:15)\n    at a.b.c.b(SourceFile:55)',
+          symbolicated_stacktrace: [
+            'java.net.SocketTimeoutException: timeout waiting for edge response',
+            '    at com.minamo.poker.feature.game.CasualGameViewModel.performAction(CasualGameViewModel.kt:426)',
+            '    at com.minamo.poker.core.data.realtime.MPRealtimeService.reconnectChannel(MPRealtimeService.kt:319)',
+          ].join('\n'),
+          breadcrumbs: [
+            { ts: isoAgo(16), level: 'info', category: 'SceneCoordinator', message: 'Showing casualGame' },
+            { ts: isoAgo(15), level: 'warning', category: 'CasualGame', message: 'Action failed (attempt 1/3): timeout' },
+            { ts: isoAgo(14), level: 'warning', category: 'CasualGame', message: 'Action failed (attempt 2/3): timeout' },
+            { ts: isoAgo(14), level: 'error', category: 'CasualGame', message: 'Action failed after 3 attempts: timeout waiting for edge response' },
+          ],
+          extra: { currentScene: 'casualGame', currentPanel: null, networkType: 'cellular', thermalState: 'fair', isLowPowerMode: false, tableId: 'tbl-9182', action: 'raise' },
+          created_at: isoAgo(14),
+        },
+        {
+          id: 502,
+          issue_id: 102,
+          session_id: 'sess-demo-5',
+          environment: 'demo',
+          platform: 'ios',
+          app_version: '2.0.2',
+          level: 'error',
+          is_fatal: false,
+          category: 'Realtime',
+          message: '[Realtime] Channel subscription gave up after 5 attempts on ranked_cards:<id>',
+          stacktrace: [
+            'MinamoPoker.RealtimeError.reconnectFailed',
+            '  at MPRealtimeService.subscribeWithRetry (MPRealtimeService.swift:418)',
+            '  at RankedGameViewModel.setupSubscriptions (RankedGameViewModel.swift:287)',
+          ].join('\n'),
+          breadcrumbs: [
+            { ts: isoAgo(40), level: 'info', category: 'SceneCoordinator', message: 'Showing rankedGame' },
+            { ts: isoAgo(39), level: 'warning', category: 'Realtime', message: 'Health check failed: pong timeout (10s)' },
+            { ts: isoAgo(38), level: 'error', category: 'Realtime', message: 'Channel subscription gave up after 5 attempts on ranked_cards:<id>' },
+          ],
+          extra: { currentScene: 'rankedGame', currentPanel: null, networkType: 'wifi', thermalState: 'nominal', isLowPowerMode: true },
+          created_at: isoAgo(38),
+        },
+        {
+          id: 503,
+          issue_id: 103,
+          session_id: 'sess-demo-20',
+          environment: 'demo',
+          platform: 'ios',
+          app_version: '2.0.2',
+          level: 'fatal',
+          is_fatal: true,
+          category: 'AudioEngine',
+          message: 'AVAudioEngine route change crash when AirPods disconnect mid-deal animation',
+          stacktrace: [
+            'EXC_BAD_ACCESS (SIGSEGV) — KERN_INVALID_ADDRESS at 0x0000000000000018',
+            '  0  AVFAudio                        0x1a9c28104 AVAudioEngineImpl::UpdateIOUnit() + 148',
+            '  1  MinamoPoker                     0x100284910 MPAudioManager.handleRouteChange(_:) (MPAudioManager.swift:192)',
+            '  2  MinamoPoker                     0x100319420 CasualGameScene.dealHoleCardsAnimation() (CasualGameScene.swift:541)',
+          ].join('\n'),
+          breadcrumbs: [
+            { ts: isoAgo(97), level: 'info', category: 'SceneCoordinator', message: 'Showing casualGame' },
+            { ts: isoAgo(96), level: 'info', category: 'Audio', message: 'AVAudioSessionRouteChangeReason.oldDeviceUnavailable (AirPods Pro)' },
+            { ts: isoAgo(95), level: 'fatal', category: 'Crash', message: 'EXC_BAD_ACCESS in MPAudioManager.handleRouteChange' },
+          ],
+          extra: { currentScene: 'casualGame', currentPanel: null, networkType: 'wifi', thermalState: 'nominal', isLowPowerMode: false },
+          created_at: isoAgo(95),
+        },
+        {
+          id: 504,
+          issue_id: 104,
+          session_id: 'be-demo-tick-1',
+          environment: 'demo',
+          platform: 'backend',
+          app_version: '1.71.0',
+          level: 'warning',
+          is_fatal: false,
+          category: 'scheduler-tick',
+          message: '[scheduler-tick] oldest unclaimed due_work row exceeded 15s threshold (16.4s)',
+          stacktrace: 'at schedulerTick (supabase/functions/_shared/scheduler.ts:184:11)\nat serve (supabase/functions/scheduler-tick/index.ts:28:18)',
+          breadcrumbs: [
+            { ts: isoAgo(110), level: 'warning', category: 'scheduler-tick', message: 'Claimed 14 due_work rows (maxLagMs=16400)' },
+          ],
+          extra: { currentScene: 'edge-runtime', networkType: 'supabase-internal', thermalState: 'nominal', isLowPowerMode: false },
+          created_at: isoAgo(110),
+        },
+      ];
+
+      const svgCard1 = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270" viewBox="0 0 480 270"><rect width="480" height="270" rx="16" fill="#0c1424"/><ellipse cx="240" cy="135" rx="175" ry="88" fill="#133a2c" stroke="#d4af37" stroke-width="4"/><circle cx="240" cy="45" r="22" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/><text x="240" y="50" text-anchor="middle" fill="#f8fafc" font-family="sans-serif" font-size="11" font-weight="bold">ANYA</text><rect x="202" y="112" width="34" height="48" rx="4" fill="#f8fafc"/><text x="219" y="142" text-anchor="middle" fill="#e11d48" font-family="sans-serif" font-size="16" font-weight="bold">A♥</text><rect x="244" y="112" width="34" height="48" rx="4" fill="#f8fafc"/><text x="261" y="142" text-anchor="middle" fill="#0f172a" font-family="sans-serif" font-size="16" font-weight="bold">K♠</text><text x="240" y="242" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="11">Shake-to-Report Snapshot · iOS v2.0.2 (13)</text></svg>`;
+      const svgBase64 = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgCard1);
+
+      const bug_reports = [
+        {
+          id: 1,
+          environment: 'demo',
+          platform: 'ios',
+          app_version: '2.0.2',
+          device_model: 'iPhone 16 Pro',
+          os_version: 'iOS 18.1',
+          username: 'cjbrasino',
+          message: 'Verified Anya Spades expression set at the casual table — portrait and raise panel transition look super clean!',
+          screenshot_base64: svgBase64,
+          status: 'open',
+          breadcrumbs: [
+            { ts: isoAgo(14), level: 'info', category: 'SceneCoordinator', message: 'Showing home' },
+            { ts: isoAgo(13), level: 'info', category: 'Panel', message: 'Opened characterSetup panel (Anya · Spades)' },
+            { ts: isoAgo(12), level: 'info', category: 'SceneCoordinator', message: 'Showing casualGame' },
+          ],
+          created_at: isoAgo(12),
+        },
+        {
+          id: 2,
+          environment: 'demo',
+          platform: 'android',
+          app_version: '2.0.2',
+          device_model: 'Pixel 9 Pro',
+          os_version: 'Android 15 (API 35)',
+          username: 'HighRoller99',
+          message: 'Spin wheel badge showed 1 spin available after returning from background, cleared after tapping Spin panel.',
+          screenshot_base64: svgBase64,
+          status: 'open',
+          breadcrumbs: [
+            { ts: isoAgo(32), level: 'info', category: 'SceneCoordinator', message: 'Showing home' },
+            { ts: isoAgo(31), level: 'info', category: 'Spin', message: 'Refreshed spin status: 1 available' },
+          ],
+          created_at: isoAgo(30),
+        },
+      ];
+
+      return { sessions, issues, error_events, product_events, performance_spans, bug_reports };
+    }
+
+    function getOrBuildDemoSnapshot() {
+      if (!state.demoSnapCache) {
+        state.demoSnapCache = buildDemoSnapshot();
+      }
+      return state.demoSnapCache;
+    }
+
     function syncEnvButtonsUI() {
-      document.body.setAttribute('data-env', state.environment);
+      document.body.setAttribute('data-env', state.environment === 'demo' ? 'local' : state.environment);
       document.querySelectorAll('#envSelector button').forEach(b => {
         b.classList.toggle('active', b.getAttribute('data-env') === state.environment);
       });
@@ -878,7 +1264,7 @@
 
     async function setEnvironment(env) {
       state.environment = env;
-      localStorage.setItem('cortex_env', env);
+      localStorage.setItem('cortex_active_env_v2', env);
       state.appVersion = 'all';
       state.compareVersion = 'all';
       state.edgeSnapCache = null;
@@ -919,9 +1305,38 @@
     }
 
     async function fetchEdgeSnapshot(forceRefresh = false) {
+      if (state.environment === 'demo' && state.dataSource === 'local_server') {
+        state.demoKeyVerified = true;
+        return getOrBuildDemoSnapshot();
+      }
       if (!state.ownerKey) {
         state.edgeLastError = null;
         return null;
+      }
+      if (state.environment === 'demo') {
+        if (!state.demoKeyVerified) {
+          try {
+            const verifyUrl = `${getEdgeUrl('staging')}?action=verify`;
+            const vRes = await fetch(verifyUrl, {
+              headers: {
+                Authorization: `Bearer ${state.ownerKey}`,
+                'x-cortex-owner-key': state.ownerKey,
+                Accept: 'application/json',
+              },
+            });
+            const vBody = await vRes.json().catch(() => ({}));
+            if (!vRes.ok) {
+              state.edgeLastError = vBody.error || `Edge Gate returned HTTP ${vRes.status}`;
+              return null;
+            }
+            state.demoKeyVerified = true;
+          } catch (err) {
+            state.edgeLastError = 'Could not verify Cortex Owner Key against Supabase Edge Gate.';
+            return null;
+          }
+        }
+        state.edgeLastError = null;
+        return getOrBuildDemoSnapshot();
       }
       if (!forceRefresh && state.edgeSnapCache && state.edgeSnapEnv === `${state.environment}:${state.windowHours}`) {
         return state.edgeSnapCache;
@@ -941,6 +1356,7 @@
           state.edgeLastError = body.error || `Edge Gate returned HTTP ${res.status}`;
           return null;
         }
+        state.demoKeyVerified = true;
         state.edgeLastError = null;
         state.edgeSnapCache = body.snapshot || {
           sessions: [],
@@ -966,9 +1382,10 @@
             if (fallbackRes.ok) {
               const fbBody = await fallbackRes.json().catch(() => ({}));
               state.environment = 'staging';
-              localStorage.setItem('cortex_env', 'staging');
+              localStorage.setItem('cortex_active_env_v2', 'staging');
               syncEnvButtonsUI();
               updateBanner();
+              state.demoKeyVerified = true;
               state.edgeLastError = null;
               state.edgeSnapCache = fbBody.snapshot || {
                 sessions: [],
@@ -1003,76 +1420,111 @@
       const sessions = filterRowsByState(snap.sessions);
       const allEnvSessions = filterRowsByState(snap.sessions, false);
       const issues = filterRowsByState(snap.issues, false);
-      const spans = filterRowsByState(snap.performance_spans);
-      const events = filterRowsByState(snap.product_events);
+      const allEnvSpans = filterRowsByState(snap.performance_spans, false);
 
       const totalSessions = sessions.length;
       const crashedSessions = sessions.filter(s => s.status === 'crashed').length;
       const erroredSessions = sessions.filter(s => Number(s.errors_count || 0) > 0).length;
-      const activeUsers = new Set(sessions.map(s => s.user_id || s.install_id || s.session_id)).size;
-      const avgDurationSec = totalSessions > 0
+      const allUsersSet = new Set(sessions.map(s => s.user_id || s.install_id || s.session_id));
+      const crashedUsersSet = new Set(sessions.filter(s => s.status === 'crashed').map(s => s.user_id || s.install_id || s.session_id));
+      const activeUsers = allUsersSet.size;
+      const avgSessionSec = totalSessions > 0
         ? Math.round(sessions.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / totalSessions / 1000)
         : 0;
       const crashFreeSessionsPct = totalSessions > 0 ? Number((((totalSessions - crashedSessions) / totalSessions) * 100).toFixed(2)) : 100;
-      const errorFreeSessionsPct = totalSessions > 0 ? Number((((totalSessions - erroredSessions) / totalSessions) * 100).toFixed(2)) : 100;
+      const crashFreeUsersPct = activeUsers > 0 ? Number((((activeUsers - crashedUsersSet.size) / activeUsers) * 100).toFixed(2)) : 100;
 
+      const totalAllEnvSessions = Math.max(1, allEnvSessions.length);
       const byVer = new Map();
       for (const s of allEnvSessions) {
         const key = `${s.platform}:${s.app_version}`;
-        if (!byVer.has(key)) byVer.set(key, { platform: s.platform, appVersion: s.app_version, total: 0, crashed: 0, errored: 0, users: new Set() });
+        if (!byVer.has(key)) byVer.set(key, { platform: s.platform, appVersion: s.app_version, total: 0, crashed: 0, totalErrors: 0, users: new Set() });
         const g = byVer.get(key);
         g.total++;
         if (s.status === 'crashed') g.crashed++;
-        if (Number(s.errors_count || 0) > 0) g.errored++;
+        g.totalErrors += Number(s.errors_count || 0);
         g.users.add(s.user_id || s.install_id || s.session_id);
       }
-      const releases = Array.from(byVer.values()).map(g => ({
+      const versionBreakdown = Array.from(byVer.values()).map(g => ({
         platform: g.platform,
         appVersion: g.appVersion,
-        totalSessions: g.total,
-        crashedSessions: g.crashed,
-        erroredSessions: g.errored,
-        activeUsers: g.users.size,
+        adoptionPct: Number(((g.total / totalAllEnvSessions) * 100).toFixed(1)),
+        sessions: g.total,
+        users: g.users.size,
         crashFreePct: g.total > 0 ? Number((((g.total - g.crashed) / g.total) * 100).toFixed(2)) : 100,
-      })).sort((a, b) => b.appVersion.localeCompare(a.appVersion));
+        totalErrors: g.totalErrors,
+      })).sort((a, b) => b.appVersion.localeCompare(a.appVersion) || b.sessions - a.sessions);
 
-      const byDay = new Map();
-      for (const s of sessions) {
-        const day = String(s.started_at || '').slice(0, 10);
-        if (!day) continue;
-        if (!byDay.has(day)) byDay.set(day, { day, sessions: 0, crashes: 0, users: new Set() });
-        const d = byDay.get(day);
-        d.sessions++;
-        if (s.status === 'crashed') d.crashes++;
-        d.users.add(s.user_id || s.install_id || s.session_id);
+      // Version-over-Version Comparison (e.g. 2.0.2 vs 2.0.1)
+      const uniqueVersions = Array.from(new Set(allEnvSessions.map(s => String(s.app_version || '')).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+      let versionComparison = null;
+      const curVer = state.appVersion !== 'all' ? state.appVersion : uniqueVersions[0];
+      const prevVer = state.compareVersion !== 'all' ? state.compareVersion : uniqueVersions.find(v => v !== curVer);
+      if (curVer && prevVer && curVer !== prevVer) {
+        const calcVerStats = (ver) => {
+          const vs = allEnvSessions.filter(s => s.app_version === ver);
+          const vTotal = vs.length;
+          const vCrashed = vs.filter(s => s.status === 'crashed').length;
+          const vCf = vTotal > 0 ? Number((((vTotal - vCrashed) / vTotal) * 100).toFixed(2)) : 100;
+          const vAvgSec = vTotal > 0 ? Math.round(vs.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / vTotal / 1000) : 0;
+          const vSpans = allEnvSpans.filter(sp => sp.app_version === ver && sp.name === 'app.cold_start');
+          const vStartupMs = vSpans.length > 0 ? Math.round(vSpans.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / vSpans.length) : 0;
+          return { sessions: vTotal, crashFreePct: vCf, avgSessionSec: vAvgSec, avgStartupMs: vStartupMs };
+        };
+        const curStats = calcVerStats(curVer);
+        const prevStats = calcVerStats(prevVer);
+        const newIssuesInCurrent = issues.filter(i => i.first_seen_version === curVer && i.status !== 'resolved').length;
+        versionComparison = {
+          currentVersion: curVer,
+          previousVersion: prevVer,
+          current: curStats,
+          previous: prevStats,
+          deltas: {
+            crashFreePctDelta: Number((curStats.crashFreePct - prevStats.crashFreePct).toFixed(2)),
+            avgSessionSecDelta: curStats.avgSessionSec - prevStats.avgSessionSec,
+            startupMsDelta: curStats.avgStartupMs - prevStats.avgStartupMs,
+            newIssuesInCurrent,
+          },
+        };
       }
-      const dailyTrend = Array.from(byDay.values()).map(d => ({
-        day: d.day,
-        sessions: d.sessions,
-        crashes: d.crashes,
-        dau: d.users.size,
-        crashFreePct: d.sessions > 0 ? Number((((d.sessions - d.crashes) / d.sessions) * 100).toFixed(2)) : 100,
-      })).sort((a, b) => a.day.localeCompare(b.day));
 
       const regressedCount = issues.filter(i => i.status === 'regressed').length;
       const unresolvedCount = issues.filter(i => i.status !== 'resolved').length;
-      const topIssue = [...issues].sort((a, b) => Number(b.events_count || 0) - Number(a.events_count || 0))[0];
+      const topIssues = [...issues].sort((a, b) => {
+        if (a.status === 'regressed' && b.status !== 'regressed') return -1;
+        if (b.status === 'regressed' && a.status !== 'regressed') return 1;
+        return Number(b.events_count || 0) - Number(a.events_count || 0);
+      });
 
       let status = 'healthy';
       if (crashFreeSessionsPct < 98.5 || regressedCount > 0) status = 'critical';
-      else if (crashFreeSessionsPct < 99.5 || unresolvedCount > 2) status = 'warning';
+      else if (crashFreeSessionsPct < 99.5 || unresolvedCount > 1) status = 'warning';
 
-      const headline = status === 'healthy'
-        ? `${state.environment.toUpperCase()} is healthy (${crashFreeSessionsPct}% crash-free across ${totalSessions} sessions).`
-        : `${state.environment.toUpperCase()} needs attention: ${crashFreeSessionsPct}% crash-free (${unresolvedCount} open issues).`;
+      const envTitle = state.environment === 'demo' ? 'DEMO (SAMPLE DATA)' : state.environment.toUpperCase();
+      const headline = totalSessions === 0
+        ? `${envTitle} connected — 0 live sessions recorded yet in this window.`
+        : status === 'healthy'
+          ? `${envTitle} is healthy (${crashFreeSessionsPct}% crash-free across ${totalSessions} sessions).`
+          : `${envTitle} needs attention: ${crashFreeSessionsPct}% crash-free (${regressedCount} regressed, ${unresolvedCount} open issues).`;
 
       const actionItems = [];
-      if (topIssue) {
+      for (const iss of topIssues.filter(i => i.status !== 'resolved').slice(0, 2)) {
         actionItems.push({
-          severity: topIssue.is_fatal ? 'critical' : 'warning',
-          text: `${topIssue.status === 'regressed' ? 'Regressed' : 'Top'} ${topIssue.platform.toUpperCase()} ${topIssue.is_fatal ? 'Crash' : 'Error'}: "${topIssue.title}" (${topIssue.events_count} events)`,
+          severity: iss.status === 'regressed' || iss.is_fatal ? 'critical' : 'warning',
+          label: `${iss.status === 'regressed' ? 'REGRESSED' : iss.is_fatal ? 'CRASH' : 'ERROR'} · ${iss.platform.toUpperCase()}`,
+          detail: `${iss.title} (${iss.events_count} events)`,
           targetTab: 'triage',
-          targetId: Number(topIssue.id),
+          targetId: Number(iss.id),
+        });
+      }
+      const openReportsCount = (snap.bug_reports || []).filter(r => r.status === 'open' && (state.environment === 'all' || r.environment === state.environment)).length;
+      if (openReportsCount > 0) {
+        actionItems.push({
+          severity: 'healthy',
+          label: `INBOX · ${openReportsCount} NEW`,
+          detail: `${openReportsCount} player Shake-to-Report bug report${openReportsCount > 1 ? 's' : ''} awaiting review`,
+          targetTab: 'inbox',
+          targetId: 0,
         });
       }
 
@@ -1082,16 +1534,16 @@
           crashedSessions,
           erroredSessions,
           activeUsers,
-          avgDurationSec,
+          avgSessionSec,
           crashFreeSessionsPct,
-          errorFreeSessionsPct,
+          crashFreeUsersPct,
           regressedIssues: regressedCount,
           unresolvedIssues: unresolvedCount,
         },
         briefing: { status, headline, actionItems },
-        versionComparison: null,
-        releases,
-        dailyTrend,
+        versionComparison,
+        versionBreakdown,
+        topIssues,
       };
     }
 
@@ -1108,14 +1560,17 @@
         ranked: { queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0, aiFallbackMatches: 0, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
         tourney: { queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0, aiFallbackMatches: 0, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
       };
-      const characterCounts = new Map([['amara', 0], ['anya', 0], ['brutus', 0], ['lenny', 0]]);
+      const characterCounts = new Map([['anya', 0], ['amara', 0], ['brutus', 0], ['lenny', 0]]);
       const characterShowroomMap = new Map([
-        ['amara', { previews: 0, purchases: 0, abandons: 0 }],
         ['anya', { previews: 0, purchases: 0, abandons: 0 }],
+        ['amara', { previews: 0, purchases: 0, abandons: 0 }],
         ['brutus', { previews: 0, purchases: 0, abandons: 0 }],
         ['lenny', { previews: 0, purchases: 0, abandons: 0 }],
       ]);
-      const tableLeaveReasons = { voluntary: 0, busted_chips: 0, match_complete: 0, disconnected: 0 };
+      const expressionSetCounts = new Map([
+        ['default', 0], ['set1', 0], ['set2', 0], ['spades', 0], ['hearts', 0], ['diamonds', 0], ['clubs', 0],
+      ]);
+      const tableLeaveReasons = { voluntary: 0, busted_chips: 0, timeout_kicked: 0, disconnected: 0 };
       const funnelStages = {
         cold_launch: new Set(), preload_complete: new Set(), auth_complete: new Set(),
         home_reached: new Set(), lobby_opened: new Set(), queue_joined: new Set(),
@@ -1157,7 +1612,12 @@
           funnelStages.table_seated.add(actor);
           const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
           const waitMs = Number(props.waitMs ?? props.wait_duration_ms ?? 0);
-          if (modeStats[mode]) { modeStats[mode].queueMatches++; modeStats[mode].totalWaitMs += waitMs; }
+          const hasAi = props.hasAiBots === true || props.hasAiBots === 'true';
+          if (modeStats[mode]) {
+            modeStats[mode].queueMatches++;
+            modeStats[mode].totalWaitMs += waitMs;
+            if (hasAi) modeStats[mode].aiFallbackMatches++;
+          }
         } else if (r.name === 'queue.cancelled' || r.name === 'matchmaking.cancelled') {
           const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
           const waitMs = Number(props.waitMs ?? props.wait_duration_ms ?? 0);
@@ -1176,9 +1636,15 @@
             handsTableLeftBySession.set(sk, (handsTableLeftBySession.get(sk) ?? 0) + hands);
           }
           if (modeStats[mode]) { modeStats[mode].tablesCompleted++; modeStats[mode].totalHandsPlayed += hands; }
+        } else if (r.name === 'game_summary.action') {
+          const choice = String(props.exitChoice ?? props.exit_choice ?? props.action ?? '');
+          if (choice === 'play_again' || choice === 'requeue') funnelStages.play_again.add(actor);
         } else if (r.name === 'character.selected' || r.name === 'customize.equipped') {
           const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
           if (characterCounts.has(rawChar)) characterCounts.set(rawChar, characterCounts.get(rawChar) + 1);
+        } else if (r.name === 'character.expression_changed') {
+          const skey = String(props.setKey ?? props.set_key ?? 'default').toLowerCase();
+          if (expressionSetCounts.has(skey)) expressionSetCounts.set(skey, expressionSetCounts.get(skey) + 1);
         } else if (r.name === 'store.item_previewed') {
           const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
           if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).previews++;
@@ -1205,11 +1671,12 @@
         const dauSharePct = Number(((m.users.size / totalUsers) * 100).toFixed(1));
         const avgDwellSec = m.dwellCount > 0 ? Number((m.totalDwellMs / m.dwellCount / 1000).toFixed(1)) : 0;
         const interactionRatePct = m.opens > 0 ? Number(((m.interactedCount / m.opens) * 100).toFixed(1)) : 0;
+        const opensPerUser = m.users.size > 0 ? Number((m.opens / m.users.size).toFixed(1)) : 0;
         let status = 'healthy';
         if (dauSharePct >= 45 && interactionRatePct >= 65) status = 'loved';
         else if (dauSharePct < 12) status = 'ignored';
         else if (dauSharePct < 25 || interactionRatePct < 45) status = 'underused';
-        return { panelKey, label: meta.label, group: meta.group, opens: m.opens, uniqueUsers: m.users.size, dauSharePct, avgDwellSec, interactionRatePct, status };
+        return { panelKey, label: meta.label, group: meta.group, opens: m.opens, opensPerUser, uniqueUsers: m.users.size, dauSharePct, avgDwellSec, interactionRatePct, status };
       }).sort((a, b) => b.dauSharePct - a.dauSharePct || b.opens - a.opens);
 
       const gameModes = Object.entries(modeStats).map(([mode, st]) => ({
@@ -1226,15 +1693,24 @@
         characterId, count, sharePct: Number(((count / totalCharSel) * 100).toFixed(1)),
       })).sort((a, b) => b.count - a.count);
 
-      const characterShowroom = Array.from(characterShowroomMap.entries()).map(([characterId, sr]) => ({
-        characterId,
-        equippedCount: characterCounts.get(characterId) ?? 0,
-        equippedSharePct: characterPopularity.find(c => c.characterId === characterId)?.sharePct ?? 0,
-        previews: sr.previews,
-        purchases: sr.purchases,
-        abandons: sr.abandons,
-        conversionPct: sr.previews > 0 ? Number(((sr.purchases / sr.previews) * 100).toFixed(1)) : 0,
-      })).sort((a, b) => b.equippedCount - a.equippedCount);
+      const characterShowroom = Array.from(characterShowroomMap.entries()).map(([characterId, sr]) => {
+        const sharePct = characterPopularity.find(c => c.characterId === characterId)?.sharePct ?? 0;
+        return {
+          characterId,
+          equippedCount: characterCounts.get(characterId) ?? 0,
+          sharePct,
+          equippedSharePct: sharePct,
+          previews: sr.previews,
+          purchases: sr.purchases,
+          abandons: sr.abandons,
+          conversionPct: sr.previews > 0 ? Number(((sr.purchases / sr.previews) * 100).toFixed(1)) : 0,
+        };
+      }).sort((a, b) => b.equippedCount - a.equippedCount);
+
+      const totalExprSel = Math.max(1, Array.from(expressionSetCounts.values()).reduce((a, b) => a + b, 0));
+      const expressionPopularity = Array.from(expressionSetCounts.entries()).map(([setKey, count]) => ({
+        setKey, count, sharePct: Number(((count / totalExprSel) * 100).toFixed(1)),
+      })).sort((a, b) => b.count - a.count);
 
       const topFunnelCount = Math.max(1, funnelStages.cold_launch.size);
       const journeyFunnel = [
@@ -1266,6 +1742,7 @@
         gameModes,
         characterPopularity,
         characterShowroom,
+        expressionPopularity,
         journeyFunnel,
         tableLeaveBreakdown,
         tableInsights: {
@@ -1324,7 +1801,7 @@
     function selectAuthGateEnv(env) {
       const currentInputVal = document.getElementById('inlineOwnerKeyInput')?.value || state.ownerKey;
       state.environment = env;
-      localStorage.setItem('cortex_env', env);
+      localStorage.setItem('cortex_active_env_v2', env);
       state.edgeSnapCache = null;
       state.edgeLastError = null;
       syncEnvButtonsUI();
@@ -1349,12 +1826,15 @@
         ` : ''}
 
         <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:7px;">Environment</label>
-        <div class="auth-gate-env-toggle">
+        <div class="auth-gate-env-toggle" style="grid-template-columns:1fr 1fr 1fr;">
           <button type="button" class="auth-gate-env-btn ${state.environment === 'staging' ? 'active' : ''}" onclick="selectAuthGateEnv('staging')">
             <span class="env-dot staging"></span> Staging
           </button>
           <button type="button" class="auth-gate-env-btn ${state.environment === 'production' ? 'active' : ''}" onclick="selectAuthGateEnv('production')">
             <span class="env-dot prod"></span> Production
+          </button>
+          <button type="button" class="auth-gate-env-btn ${state.environment === 'demo' ? 'active' : ''}" onclick="selectAuthGateEnv('demo')">
+            <span class="env-dot local"></span> 🧪 Demo
           </button>
         </div>
 
@@ -1481,7 +1961,7 @@
 
     async function loadVersions() {
       let versions = [];
-      if (state.dataSource === 'edge') {
+      if (state.dataSource === 'edge' || state.environment === 'demo') {
         const snap = await fetchEdgeSnapshot();
         if (snap) {
           const vSet = new Set();
@@ -1510,14 +1990,19 @@
     }
 
     function updateBanner() {
-      document.body.setAttribute('data-env', state.environment);
+      document.body.setAttribute('data-env', state.environment === 'demo' ? 'local' : state.environment);
       const platLabel = state.platform === 'all' ? 'All Platforms (iOS + Android + Backend)' : state.platform.toUpperCase();
       const verLabel = state.appVersion === 'all' ? 'All Versions' : `v${state.appVersion}`;
-      const modeBadge = state.dataSource === 'edge' ? '⚡ Supabase Edge Gate (Serverless PWA)' : '🖥️ Local SQLite Server';
+      const envLabel = state.environment === 'demo' ? '🧪 DEMO (INTERACTIVE SAMPLE DATA)' : state.environment.toUpperCase();
+      const modeBadge = state.environment === 'demo'
+        ? '🧪 Sample Telemetry · Switch to STAGING or PRODUCTION above for live data'
+        : state.dataSource === 'edge'
+          ? '⚡ Supabase Edge Gate (Serverless PWA)'
+          : '🖥️ Local SQLite Server';
       document.getElementById('envBannerText').textContent =
-        `Active Environment: ${state.environment.toUpperCase()} · ${platLabel} · ${verLabel}`;
+        `Active Environment: ${envLabel} · ${platLabel} · ${verLabel}`;
       const modeEl = document.getElementById('envBannerMode');
-      if (modeEl) modeEl.textContent = `${modeBadge} · Zero Third-Party SDKs`;
+      if (modeEl) modeEl.textContent = modeBadge;
     }
 
     function switchTab(tabName) {
@@ -1540,7 +2025,7 @@
       updateBanner();
       const root = document.getElementById('viewRoot');
 
-      if (state.dataSource === 'edge') {
+      if (state.dataSource === 'edge' || state.environment === 'demo') {
         const snap = await fetchEdgeSnapshot();
         if (!snap) {
           setPortalUnlocked(false);
@@ -1659,6 +2144,15 @@
       ` : '';
 
       root.innerHTML = `
+        ${s.totalSessions === 0 && state.environment !== 'demo' ? `
+          <div class="panel-card" style="border-color:rgba(56,189,248,0.45);background:rgba(14,165,233,0.08);display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:700;font-size:14px;color:var(--text);">Live ${escapeHtml(state.environment.toUpperCase())} database is connected and ready (0 sessions recorded yet)</div>
+              <div style="font-size:12px;color:var(--text-secondary);margin-top:3px;">Want to preview how Cortex looks with 140 sessions, version comparisons, 13-panel heatmaps, crash stack traces, and bug reports?</div>
+            </div>
+            <button class="btn primary" onclick="setEnvironment('demo')">🧪 Load Interactive Demo Data</button>
+          </div>
+        ` : ''}
         <!-- 1. Plain-English Morning Briefing Banner -->
         <div class="briefing-card ${escapeHtml(briefing.status)}">
           <div class="briefing-header">
@@ -2186,7 +2680,7 @@
 
     async function openIssueDetail(issueId) {
       let data;
-      if (state.dataSource === 'edge') {
+      if (state.dataSource === 'edge' || state.environment === 'demo') {
         const snap = await fetchEdgeSnapshot();
         if (!snap) return;
         const iss = (snap.issues || []).find(i => Number(i.id) === Number(issueId));
@@ -2331,7 +2825,7 @@
     async function refreshLiveStream() {
       const container = document.getElementById('liveStreamContent');
       let rawItems = [];
-      if (state.dataSource === 'edge') {
+      if (state.dataSource === 'edge' || state.environment === 'demo') {
         const snap = await fetchEdgeSnapshot(true);
         if (snap) {
           const evs = filterRowsByState(snap.product_events, false).slice(0, 30).map(e => ({
@@ -2398,7 +2892,11 @@
     }
 
     async function setIssueStatus(issueId, status, version) {
-      if (state.dataSource === 'edge') {
+      if (state.environment === 'demo') {
+        const snap = getOrBuildDemoSnapshot();
+        const iss = (snap.issues || []).find(i => Number(i.id) === Number(issueId));
+        if (iss) iss.status = status;
+      } else if (state.dataSource === 'edge') {
         await fetch(getEdgeUrl(state.environment), {
           method: 'POST',
           headers: {
@@ -2421,7 +2919,11 @@
     }
 
     async function toggleReportStatus(reportId, status) {
-      if (state.dataSource === 'edge') {
+      if (state.environment === 'demo') {
+        const snap = getOrBuildDemoSnapshot();
+        const rep = (snap.bug_reports || []).find(r => Number(r.id) === Number(reportId));
+        if (rep) rep.status = status;
+      } else if (state.dataSource === 'edge') {
         await fetch(getEdgeUrl(state.environment), {
           method: 'POST',
           headers: {
