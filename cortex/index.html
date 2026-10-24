@@ -1,0 +1,2305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#070a10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Minamo Cortex" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%2338bdf8'/%3E%3Cstop offset='100%25' stop-color='%236366f1'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='180' height='180' rx='40' fill='url(%23g)'/%3E%3Ctext x='90' y='122' text-anchor='middle' font-family='-apple-system,BlinkMacSystemFont,sans-serif' font-size='102' font-weight='900' fill='%2305080f'%3EC%3C/text%3E%3C/svg%3E" />
+  <title>Minamo Cortex · Observability & Product Analytics</title>
+  <style>
+    :root {
+      --bg: #070a10;
+      --bg-elevated: #0d121d;
+      --card: #111827;
+      --card-hover: #172033;
+      --border: #1e293b;
+      --border-subtle: #162032;
+      --text: #f8fafc;
+      --text-secondary: #cbd5e1;
+      --muted: #64748b;
+      --accent: #38bdf8;
+      --env-color: #f43f5e;
+      --env-bg: rgba(244, 63, 94, 0.12);
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #f43f5e;
+      --purple: #a855f7;
+      --indigo: #6366f1;
+    }
+
+    body[data-env="production"] {
+      --env-color: #f43f5e;
+      --env-bg: rgba(244, 63, 94, 0.12);
+    }
+    body[data-env="staging"] {
+      --env-color: #f59e0b;
+      --env-bg: rgba(245, 158, 11, 0.12);
+    }
+    body[data-env="local"] {
+      --env-color: #10b981;
+      --env-bg: rgba(16, 185, 129, 0.12);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", system-ui, sans-serif;
+      min-height: 100vh;
+      border-top: 3px solid var(--env-color);
+      transition: border-color 0.2s ease;
+    }
+
+    /* Top Persistent Context Bar */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: rgba(13, 18, 29, 0.94);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, var(--env-color), #6366f1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 16px;
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    }
+    .brand-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .context-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* Environment Switcher Pills */
+    .segmented {
+      display: inline-flex;
+      background: #070a10;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .segmented button {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 11px;
+      border-radius: 7px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .segmented button:hover {
+      color: var(--text);
+    }
+    .segmented button.active {
+      background: var(--card-hover);
+      color: var(--text);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    .env-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+    }
+    .env-dot.prod { background: var(--red); box-shadow: 0 0 8px var(--red); }
+    .env-dot.staging { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .env-dot.local { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+    select.filter-select {
+      background: #070a10;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      outline: none;
+      cursor: pointer;
+    }
+
+    /* Navigation Tabs */
+    .nav-tabs {
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+    }
+    .nav-tab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 13px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .nav-tab:hover { color: var(--text-secondary); }
+    .nav-tab.active {
+      color: var(--text);
+      border-bottom-color: var(--env-color);
+    }
+    .tab-badge {
+      font-size: 11px;
+      padding: 1px 7px;
+      border-radius: 99px;
+      background: rgba(255,255,255,0.07);
+      color: var(--text-secondary);
+    }
+
+    /* Main Container */
+    .container {
+      max-width: 1420px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .env-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--env-bg);
+      border: 1px solid var(--env-color);
+      border-radius: 10px;
+      margin-bottom: 18px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* Morning Briefing Banner */
+    .briefing-card {
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 22px;
+      border: 1px solid var(--border);
+      background: linear-gradient(135deg, rgba(17, 24, 39, 0.96), rgba(13, 18, 29, 0.96));
+    }
+    .briefing-card.healthy { border-left: 4px solid var(--green); }
+    .briefing-card.warning { border-left: 4px solid var(--amber); }
+    .briefing-card.critical { border-left: 4px solid var(--red); }
+
+    .briefing-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .briefing-title {
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .action-items-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .action-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #080c14;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .action-chip:hover {
+      border-color: var(--accent);
+      background: var(--card-hover);
+    }
+
+    /* Metric Grid */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 20px;
+    }
+    .kpi-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .kpi-value {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 4px;
+    }
+    .kpi-sub {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    /* Delta Badges for Version Comparison */
+    .delta-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .delta-badge.good { background: rgba(16, 185, 129, 0.16); color: #34d399; }
+    .delta-badge.bad { background: rgba(244, 63, 94, 0.16); color: #fb7185; }
+    .delta-badge.neutral { background: rgba(148, 163, 184, 0.15); color: #94a3b8; }
+
+    /* Visual App Map Grid (Radar) */
+    .app-map-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .map-node {
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 13px 14px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+    .map-node:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+    }
+    .map-node.loved {
+      border-color: rgba(16, 185, 129, 0.55);
+      box-shadow: inset 0 0 24px rgba(16, 185, 129, 0.08);
+    }
+    .map-node.healthy {
+      border-color: rgba(56, 189, 248, 0.4);
+    }
+    .map-node.underused {
+      border-color: rgba(245, 158, 11, 0.45);
+    }
+    .map-node.ignored {
+      border-color: rgba(244, 63, 94, 0.45);
+      opacity: 0.82;
+    }
+
+    /* Visual Player Journey Storyboard */
+    .journey-track {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+      max-height: 320px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .journey-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #080c14;
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 9px 13px;
+      font-size: 12px;
+    }
+    .journey-step.crash, .journey-step.error {
+      border-color: rgba(244, 63, 94, 0.6);
+      background: rgba(244, 63, 94, 0.08);
+    }
+    .journey-step.warning {
+      border-color: rgba(245, 158, 11, 0.5);
+      background: rgba(245, 158, 11, 0.06);
+    }
+    .journey-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--accent);
+    }
+    .journey-step.launch .journey-dot { background: var(--green); }
+    .journey-step.scene .journey-dot { background: var(--accent); }
+    .journey-step.panel .journey-dot { background: var(--purple); }
+    .journey-step.gameplay .journey-dot { background: var(--indigo); }
+    .journey-step.warning .journey-dot { background: var(--amber); }
+    .journey-step.error .journey-dot, .journey-step.crash .journey-dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+    /* Section Cards */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+    .panel-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .panel-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .panel-subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      vertical-align: middle;
+    }
+    tr.clickable-row { cursor: pointer; transition: background 0.12s ease; }
+    tr.clickable-row:hover { background: var(--card-hover); }
+
+    /* Pills & Badges */
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .pill.ios { background: rgba(56, 189, 248, 0.14); color: #38bdf8; }
+    .pill.android { background: rgba(16, 185, 129, 0.14); color: #34d399; }
+    .pill.backend { background: rgba(168, 85, 247, 0.14); color: #c084fc; }
+
+    .pill.loved { background: rgba(16, 185, 129, 0.16); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
+    .pill.healthy { background: rgba(56, 189, 248, 0.14); color: #38bdf8; }
+    .pill.underused { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+    .pill.ignored { background: rgba(244, 63, 94, 0.15); color: #fb7185; }
+
+    .pill.unresolved { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
+    .pill.regressed { background: rgba(244, 63, 94, 0.2); color: #fda4af; border: 1px solid rgba(244, 63, 94, 0.5); }
+    .pill.resolved { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+
+    /* Horizontal Progress Bars */
+    .bar-track {
+      width: 100%;
+      height: 8px;
+      background: #080b11;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      transition: width 0.3s ease;
+    }
+
+    /* Issue Inspector & Live Stream Drawers */
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      display: none;
+      justify-content: flex-end;
+    }
+    .drawer-backdrop.open { display: flex; }
+    .drawer {
+      width: min(820px, 95vw);
+      height: 100vh;
+      background: var(--bg-elevated);
+      border-left: 1px solid var(--border);
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    .code-block {
+      background: #05070b;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #e2e8f0;
+      overflow-x: auto;
+      white-space: pre;
+      margin-top: 8px;
+    }
+    .code-line-app {
+      color: #38bdf8;
+      font-weight: 600;
+    }
+
+    .btn {
+      background: var(--card-hover);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 7px 13px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .btn.primary { background: #0284c7; border-color: #0ea5e9; color: #fff; }
+    .btn.live-active {
+      border-color: var(--green);
+      background: rgba(16, 185, 129, 0.14);
+      color: #34d399;
+    }
+
+    /* Mobile / iPhone PWA Safe Area & Responsive Layout */
+    @supports (padding-top: env(safe-area-inset-top)) {
+      .topbar {
+        padding-top: max(12px, env(safe-area-inset-top));
+      }
+      .container {
+        padding-bottom: max(28px, env(safe-area-inset-bottom));
+      }
+    }
+    @media (max-width: 768px) {
+      .topbar {
+        padding: 10px 14px;
+        gap: 10px;
+      }
+      .brand-sub {
+        display: none;
+      }
+      .context-controls {
+        width: 100%;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        padding-bottom: 4px;
+      }
+      .nav-tabs {
+        padding: 0 12px;
+      }
+      .nav-tab {
+        padding: 11px 12px;
+        font-size: 12px;
+      }
+      .container {
+        padding: 14px;
+      }
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+      .env-banner {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+    }
+  </style>
+</head>
+<body data-env="production">
+
+  <!-- Persistent Top Context Bar -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo">C</div>
+      <div>
+        <div class="brand-title">Minamo Cortex</div>
+        <div class="brand-sub">First-Party Observability, Crash Triage & Product Intelligence</div>
+      </div>
+    </div>
+
+    <div class="context-controls">
+      <!-- Environment Selector -->
+      <div class="segmented" id="envSelector">
+        <button data-env="production" class="active"><span class="env-dot prod"></span>PRODUCTION</button>
+        <button data-env="staging"><span class="env-dot staging"></span>STAGING</button>
+        <button data-env="local"><span class="env-dot local"></span>LOCAL</button>
+      </div>
+
+      <!-- Platform Selector -->
+      <div class="segmented" id="platformSelector">
+        <button data-platform="all" class="active">All Platforms</button>
+        <button data-platform="ios">iOS</button>
+        <button data-platform="android">Android</button>
+        <button data-platform="backend">Backend</button>
+      </div>
+
+      <!-- Version Filter -->
+      <select class="filter-select" id="versionSelect" title="Filter Version">
+        <option value="all">All Versions</option>
+      </select>
+
+      <!-- Compare Version Filter -->
+      <select class="filter-select" id="compareVersionSelect" title="Compare Against Version">
+        <option value="all">Compare: Auto (Prev)</option>
+      </select>
+
+      <!-- Time Window Filter -->
+      <select class="filter-select" id="windowSelect">
+        <option value="24">Last 24 Hours</option>
+        <option value="168">Last 7 Days</option>
+        <option value="720" selected>Last 30 Days</option>
+        <option value="2160">Last 90 Days</option>
+      </select>
+
+      <!-- Sync Remote Supabase Button -->
+      <button class="btn" id="syncBtn" onclick="syncSupabaseNow()" title="Pull latest telemetry from Supabase (cortex schema)">
+        ⟳ Sync Supabase
+      </button>
+
+      <!-- Edge Gate Mode / Auth Button -->
+      <button class="btn" id="edgeGateBtn" onclick="openEdgeGateDrawer()" title="Connect directly to Supabase Edge Gate (worldwide PWA mode)">
+        🔑 Edge Gate
+      </button>
+
+      <!-- Live Tail Stream Button -->
+      <button class="btn" id="liveStreamBtn" onclick="openLiveStreamDrawer()">
+        <span class="env-dot local"></span> Live Stream
+      </button>
+
+      <!-- Lock Portal Button -->
+      <form method="POST" action="/api/auth/logout" style="margin:0;" id="logoutForm">
+        <button type="submit" class="btn" title="Lock Portal">Lock</button>
+      </form>
+    </div>
+  </header>
+
+  <!-- 5 High-Signal Navigation Tabs -->
+  <nav class="nav-tabs" id="navTabs">
+    <button class="nav-tab active" data-tab="pulse">1. Pulse · Release & Health</button>
+    <button class="nav-tab" data-tab="radar">2. Radar · Product & User Analytics</button>
+    <button class="nav-tab" data-tab="triage">3. Triage · Crashes & Errors <span class="tab-badge" id="triageBadge">0</span></button>
+    <button class="nav-tab" data-tab="vitals">4. Vitals · Latency & Realtime</button>
+    <button class="nav-tab" data-tab="inbox">5. Inbox · Shake Bug Reports <span class="tab-badge" id="inboxBadge">0</span></button>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="container">
+    <div class="env-banner" id="envBanner">
+      <span id="envBannerText">Viewing PRODUCTION environment · All Platforms</span>
+      <span id="envBannerMode" style="opacity: 0.85;">100% First-Party Telemetry · Zero Third-Party SDKs</span>
+    </div>
+
+    <div id="viewRoot">Loading Cortex telemetry...</div>
+  </main>
+
+  <!-- Slide-Over Issue / Session Detail Drawer -->
+  <div class="drawer-backdrop" id="issueDrawerBackdrop">
+    <div class="drawer" id="issueDrawerContent"></div>
+  </div>
+
+  <!-- Slide-Over Live Dev Stream ("Tail Mode") Drawer -->
+  <div class="drawer-backdrop" id="liveStreamBackdrop">
+    <div class="drawer" id="liveStreamContent"></div>
+  </div>
+
+  <!-- Slide-Over Supabase Edge Gate & PWA Owner Key Drawer -->
+  <div class="drawer-backdrop" id="edgeGateBackdrop">
+    <div class="drawer" id="edgeGateContent"></div>
+  </div>
+
+  <script>
+    const DEFAULT_EDGE_URLS = {
+      production: 'https://qfadvsuvjevoeprgqcgw.supabase.co/functions/v1/cortex-admin',
+      staging: 'https://nxjxcqdfvxfsymnubdai.supabase.co/functions/v1/cortex-admin',
+      local: 'http://127.0.0.1:54321/functions/v1/cortex-admin',
+    };
+
+    const ALL_HOME_PANELS_META = {
+      casual: { label: 'Casual Matchmaking', group: 'Core Gameplay' },
+      ranked: { label: 'Ranked Competitive', group: 'Core Gameplay' },
+      tournament: { label: 'Tournaments', group: 'Core Gameplay' },
+      store: { label: 'Store & Chips', group: 'Economy & Cosmetics' },
+      deck: { label: 'Deck & Skins', group: 'Economy & Cosmetics' },
+      editProfile: { label: 'Character & Expressions', group: 'Economy & Cosmetics' },
+      stats: { label: 'Player Statistics', group: 'Progression & Social' },
+      leaderboards: { label: 'Leaderboards', group: 'Progression & Social' },
+      career: { label: 'Career & Achievements', group: 'Progression & Social' },
+      friends: { label: 'Friends & Social', group: 'Progression & Social' },
+      inbox: { label: 'Player Inbox & Gifts', group: 'Progression & Social' },
+      pokerSchool: { label: 'Poker School', group: 'Utility & Learning' },
+      settings: { label: 'Settings', group: 'Utility & Learning' },
+    };
+
+    const state = {
+      environment: 'production',
+      platform: 'all',
+      appVersion: 'all',
+      compareVersion: 'all',
+      windowHours: 720,
+      activeTab: 'pulse',
+      radarMapMode: 'reach',
+      liveStreamTimer: null,
+      liveStreamPaused: false,
+      liveStreamFilter: 'all',
+      dataSource: localStorage.getItem('cortex_data_source') || 'auto', // 'local_server' | 'edge'
+      ownerKey: localStorage.getItem('cortex_owner_key') || '',
+      edgeSnapCache: null,
+      edgeSnapEnv: null,
+      edgeLastError: null,
+    };
+
+    function getEdgeUrl(env) {
+      const custom = localStorage.getItem(`cortex_edge_url_${env}`);
+      return custom && custom.trim() ? custom.trim() : (DEFAULT_EDGE_URLS[env] || DEFAULT_EDGE_URLS.production);
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function queryStr() {
+      const p = new URLSearchParams({
+        environment: state.environment,
+        platform: state.platform,
+        appVersion: state.appVersion,
+        compareVersion: state.compareVersion,
+        windowHours: String(state.windowHours),
+      });
+      return p.toString();
+    }
+
+    async function fetchEdgeSnapshot(forceRefresh = false) {
+      if (!state.ownerKey) {
+        state.edgeLastError = 'Enter your Cortex Owner Master Key to connect to the Supabase Edge Gate.';
+        return null;
+      }
+      if (!forceRefresh && state.edgeSnapCache && state.edgeSnapEnv === `${state.environment}:${state.windowHours}`) {
+        return state.edgeSnapCache;
+      }
+      const baseUrl = getEdgeUrl(state.environment);
+      const url = `${baseUrl}?action=snapshot&environment=${encodeURIComponent(state.environment)}&windowHours=${state.windowHours}`;
+      try {
+        const res = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${state.ownerKey}`,
+            'x-cortex-owner-key': state.ownerKey,
+            Accept: 'application/json',
+          },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          state.edgeLastError = body.error || `Edge Gate returned HTTP ${res.status}`;
+          return null;
+        }
+        state.edgeLastError = null;
+        state.edgeSnapCache = body.snapshot || {
+          sessions: [],
+          issues: [],
+          error_events: [],
+          product_events: [],
+          performance_spans: [],
+          bug_reports: [],
+        };
+        state.edgeSnapEnv = `${state.environment}:${state.windowHours}`;
+        return state.edgeSnapCache;
+      } catch (err) {
+        state.edgeLastError = err && err.message ? err.message : 'Could not reach Supabase Edge Gate';
+        return null;
+      }
+    }
+
+    function filterRowsByState(rows, includeVersion = true) {
+      return (rows || []).filter(r => {
+        if (state.environment !== 'all' && r.environment && r.environment !== state.environment) return false;
+        if (state.platform !== 'all' && r.platform && r.platform !== state.platform) return false;
+        if (includeVersion && state.appVersion !== 'all' && r.app_version && r.app_version !== state.appVersion) return false;
+        return true;
+      });
+    }
+
+    function computePulseFromSnapshot(snap) {
+      const sessions = filterRowsByState(snap.sessions);
+      const allEnvSessions = filterRowsByState(snap.sessions, false);
+      const issues = filterRowsByState(snap.issues, false);
+      const spans = filterRowsByState(snap.performance_spans);
+      const events = filterRowsByState(snap.product_events);
+
+      const totalSessions = sessions.length;
+      const crashedSessions = sessions.filter(s => s.status === 'crashed').length;
+      const erroredSessions = sessions.filter(s => Number(s.errors_count || 0) > 0).length;
+      const activeUsers = new Set(sessions.map(s => s.user_id || s.install_id || s.session_id)).size;
+      const avgDurationSec = totalSessions > 0
+        ? Math.round(sessions.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / totalSessions / 1000)
+        : 0;
+      const crashFreeSessionsPct = totalSessions > 0 ? Number((((totalSessions - crashedSessions) / totalSessions) * 100).toFixed(2)) : 100;
+      const errorFreeSessionsPct = totalSessions > 0 ? Number((((totalSessions - erroredSessions) / totalSessions) * 100).toFixed(2)) : 100;
+
+      const byVer = new Map();
+      for (const s of allEnvSessions) {
+        const key = `${s.platform}:${s.app_version}`;
+        if (!byVer.has(key)) byVer.set(key, { platform: s.platform, appVersion: s.app_version, total: 0, crashed: 0, errored: 0, users: new Set() });
+        const g = byVer.get(key);
+        g.total++;
+        if (s.status === 'crashed') g.crashed++;
+        if (Number(s.errors_count || 0) > 0) g.errored++;
+        g.users.add(s.user_id || s.install_id || s.session_id);
+      }
+      const releases = Array.from(byVer.values()).map(g => ({
+        platform: g.platform,
+        appVersion: g.appVersion,
+        totalSessions: g.total,
+        crashedSessions: g.crashed,
+        erroredSessions: g.errored,
+        activeUsers: g.users.size,
+        crashFreePct: g.total > 0 ? Number((((g.total - g.crashed) / g.total) * 100).toFixed(2)) : 100,
+      })).sort((a, b) => b.appVersion.localeCompare(a.appVersion));
+
+      const byDay = new Map();
+      for (const s of sessions) {
+        const day = String(s.started_at || '').slice(0, 10);
+        if (!day) continue;
+        if (!byDay.has(day)) byDay.set(day, { day, sessions: 0, crashes: 0, users: new Set() });
+        const d = byDay.get(day);
+        d.sessions++;
+        if (s.status === 'crashed') d.crashes++;
+        d.users.add(s.user_id || s.install_id || s.session_id);
+      }
+      const dailyTrend = Array.from(byDay.values()).map(d => ({
+        day: d.day,
+        sessions: d.sessions,
+        crashes: d.crashes,
+        dau: d.users.size,
+        crashFreePct: d.sessions > 0 ? Number((((d.sessions - d.crashes) / d.sessions) * 100).toFixed(2)) : 100,
+      })).sort((a, b) => a.day.localeCompare(b.day));
+
+      const regressedCount = issues.filter(i => i.status === 'regressed').length;
+      const unresolvedCount = issues.filter(i => i.status !== 'resolved').length;
+      const topIssue = [...issues].sort((a, b) => Number(b.events_count || 0) - Number(a.events_count || 0))[0];
+
+      let status = 'healthy';
+      if (crashFreeSessionsPct < 98.5 || regressedCount > 0) status = 'critical';
+      else if (crashFreeSessionsPct < 99.5 || unresolvedCount > 2) status = 'warning';
+
+      const headline = status === 'healthy'
+        ? `${state.environment.toUpperCase()} is healthy (${crashFreeSessionsPct}% crash-free across ${totalSessions} sessions).`
+        : `${state.environment.toUpperCase()} needs attention: ${crashFreeSessionsPct}% crash-free (${unresolvedCount} open issues).`;
+
+      const actionItems = [];
+      if (topIssue) {
+        actionItems.push({
+          severity: topIssue.is_fatal ? 'critical' : 'warning',
+          text: `${topIssue.status === 'regressed' ? 'Regressed' : 'Top'} ${topIssue.platform.toUpperCase()} ${topIssue.is_fatal ? 'Crash' : 'Error'}: "${topIssue.title}" (${topIssue.events_count} events)`,
+          targetTab: 'triage',
+          targetId: Number(topIssue.id),
+        });
+      }
+
+      return {
+        summary: {
+          totalSessions,
+          crashedSessions,
+          erroredSessions,
+          activeUsers,
+          avgDurationSec,
+          crashFreeSessionsPct,
+          errorFreeSessionsPct,
+          regressedIssues: regressedCount,
+          unresolvedIssues: unresolvedCount,
+        },
+        briefing: { status, headline, actionItems },
+        versionComparison: null,
+        releases,
+        dailyTrend,
+      };
+    }
+
+    function computeRadarFromSnapshot(snap) {
+      const rows = filterRowsByState(snap.product_events);
+      const totalActiveUsersSet = new Set();
+      const totalSessionsSet = new Set();
+      const panelMetrics = new Map();
+      for (const k of Object.keys(ALL_HOME_PANELS_META)) {
+        panelMetrics.set(k, { opens: 0, users: new Set(), totalDwellMs: 0, dwellCount: 0, interactedCount: 0 });
+      }
+      const modeStats = {
+        casual: { queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0, aiFallbackMatches: 0, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
+        ranked: { queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0, aiFallbackMatches: 0, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
+        tourney: { queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0, aiFallbackMatches: 0, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
+      };
+      const characterCounts = new Map([['amara', 0], ['anya', 0], ['brutus', 0], ['lenny', 0]]);
+      const characterShowroomMap = new Map([
+        ['amara', { previews: 0, purchases: 0, abandons: 0 }],
+        ['anya', { previews: 0, purchases: 0, abandons: 0 }],
+        ['brutus', { previews: 0, purchases: 0, abandons: 0 }],
+        ['lenny', { previews: 0, purchases: 0, abandons: 0 }],
+      ]);
+      const tableLeaveReasons = { voluntary: 0, busted_chips: 0, match_complete: 0, disconnected: 0 };
+      const funnelStages = {
+        cold_launch: new Set(), preload_complete: new Set(), auth_complete: new Set(),
+        home_reached: new Set(), lobby_opened: new Set(), queue_joined: new Set(),
+        table_seated: new Set(), hand_completed: new Set(), play_again: new Set(),
+      };
+      let turnTimeouts = 0, insufficientFundsCount = 0, purchaseAbandonedCount = 0, realtimeDisconnects = 0, realtimeStateFallbacks = 0;
+      const handsCompletedBySession = new Map();
+      const handsTableLeftBySession = new Map();
+
+      for (const r of rows) {
+        const actor = r.user_id || r.install_id || r.session_id || 'anon';
+        const sk = r.session_id || actor;
+        totalActiveUsersSet.add(actor);
+        if (r.session_id) totalSessionsSet.add(r.session_id);
+        funnelStages.cold_launch.add(actor);
+        const props = (r.properties && typeof r.properties === 'object') ? r.properties : {};
+        if (r.name === 'preload.completed') funnelStages.preload_complete.add(actor);
+        else if (r.name === 'auth.completed') funnelStages.auth_complete.add(actor);
+        else if (r.name === 'scene.viewed') {
+          if (props.scene === 'home') funnelStages.home_reached.add(actor);
+          if (props.scene === 'casualGame' || props.scene === 'rankedGame') funnelStages.table_seated.add(actor);
+        } else if (r.name === 'panel.opened') {
+          const m = panelMetrics.get(String(props.panel || ''));
+          if (m) { m.opens++; m.users.add(actor); }
+          if (['casual', 'ranked', 'tournament'].includes(String(props.panel || ''))) funnelStages.lobby_opened.add(actor);
+        } else if (r.name === 'panel.closed') {
+          const m = panelMetrics.get(String(props.panel || ''));
+          const dwellMs = Number(props.dwellMs ?? props.dwell_ms ?? 0);
+          if (m) {
+            if (m.opens === 0) { m.opens++; m.users.add(actor); }
+            if (dwellMs > 0) { m.totalDwellMs += dwellMs; m.dwellCount++; }
+            if (props.interacted === true || dwellMs >= 4500) m.interactedCount++;
+          }
+        } else if (r.name === 'queue.joined' || r.name === 'matchmaking.started') {
+          funnelStages.queue_joined.add(actor);
+          const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
+          if (modeStats[mode]) modeStats[mode].queueJoins++;
+        } else if (r.name === 'queue.matched' || r.name === 'matchmaking.seated') {
+          funnelStages.table_seated.add(actor);
+          const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
+          const waitMs = Number(props.waitMs ?? props.wait_duration_ms ?? 0);
+          if (modeStats[mode]) { modeStats[mode].queueMatches++; modeStats[mode].totalWaitMs += waitMs; }
+        } else if (r.name === 'queue.cancelled' || r.name === 'matchmaking.cancelled') {
+          const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
+          const waitMs = Number(props.waitMs ?? props.wait_duration_ms ?? 0);
+          if (modeStats[mode]) { modeStats[mode].queueCancels++; modeStats[mode].totalWaitMs += waitMs; }
+        } else if (r.name === 'hand.completed') {
+          funnelStages.hand_completed.add(actor);
+          handsCompletedBySession.set(sk, (handsCompletedBySession.get(sk) ?? 0) + 1);
+        } else if (r.name === 'turn.timeout') turnTimeouts++;
+        else if (r.name === 'table.left') {
+          const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
+          const hands = Number(props.handsPlayed ?? props.hands_played ?? 0) || 0;
+          const reason = String(props.reason || 'voluntary').toLowerCase();
+          if (reason in tableLeaveReasons) tableLeaveReasons[reason]++; else tableLeaveReasons.voluntary++;
+          if (hands > 0) {
+            funnelStages.hand_completed.add(actor);
+            handsTableLeftBySession.set(sk, (handsTableLeftBySession.get(sk) ?? 0) + hands);
+          }
+          if (modeStats[mode]) { modeStats[mode].tablesCompleted++; modeStats[mode].totalHandsPlayed += hands; }
+        } else if (r.name === 'character.selected' || r.name === 'customize.equipped') {
+          const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
+          if (characterCounts.has(rawChar)) characterCounts.set(rawChar, characterCounts.get(rawChar) + 1);
+        } else if (r.name === 'store.item_previewed') {
+          const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
+          if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).previews++;
+        } else if (r.name === 'store.purchase_completed' || r.name === 'store.iap_completed') {
+          const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
+          if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).purchases++;
+        } else if (r.name === 'store.purchase_abandoned') {
+          purchaseAbandonedCount++;
+          const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
+          if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).abandons++;
+        } else if (r.name === 'economy.insufficient_funds') insufficientFundsCount++;
+        else if (r.name === 'realtime.disconnected' || r.name === 'realtime.reconnect_exhausted') realtimeDisconnects++;
+        else if (r.name === 'realtime.state_fallback') realtimeStateFallbacks++;
+      }
+
+      let totalHandsCompleted = 0;
+      for (const sk of new Set([...handsCompletedBySession.keys(), ...handsTableLeftBySession.keys()])) {
+        totalHandsCompleted += Math.max(handsCompletedBySession.get(sk) ?? 0, handsTableLeftBySession.get(sk) ?? 0);
+      }
+
+      const totalUsers = Math.max(1, totalActiveUsersSet.size);
+      const featureLeaderboard = Object.entries(ALL_HOME_PANELS_META).map(([panelKey, meta]) => {
+        const m = panelMetrics.get(panelKey);
+        const dauSharePct = Number(((m.users.size / totalUsers) * 100).toFixed(1));
+        const avgDwellSec = m.dwellCount > 0 ? Number((m.totalDwellMs / m.dwellCount / 1000).toFixed(1)) : 0;
+        const interactionRatePct = m.opens > 0 ? Number(((m.interactedCount / m.opens) * 100).toFixed(1)) : 0;
+        let status = 'healthy';
+        if (dauSharePct >= 45 && interactionRatePct >= 65) status = 'loved';
+        else if (dauSharePct < 12) status = 'ignored';
+        else if (dauSharePct < 25 || interactionRatePct < 45) status = 'underused';
+        return { panelKey, label: meta.label, group: meta.group, opens: m.opens, uniqueUsers: m.users.size, dauSharePct, avgDwellSec, interactionRatePct, status };
+      }).sort((a, b) => b.dauSharePct - a.dauSharePct || b.opens - a.opens);
+
+      const gameModes = Object.entries(modeStats).map(([mode, st]) => ({
+        mode,
+        queueJoins: st.queueJoins,
+        cancelRatePct: st.queueJoins > 0 ? Number(((st.queueCancels / st.queueJoins) * 100).toFixed(1)) : 0,
+        avgWaitSec: (st.queueMatches + st.queueCancels) > 0 ? Number((st.totalWaitMs / (st.queueMatches + st.queueCancels) / 1000).toFixed(1)) : 0,
+        aiFallbackPct: st.queueMatches > 0 ? Number(((st.aiFallbackMatches / st.queueMatches) * 100).toFixed(1)) : 0,
+        avgHandsPerSession: st.tablesCompleted > 0 ? Number((st.totalHandsPlayed / st.tablesCompleted).toFixed(1)) : 0,
+      }));
+
+      const totalCharSel = Math.max(1, Array.from(characterCounts.values()).reduce((a, b) => a + b, 0));
+      const characterPopularity = Array.from(characterCounts.entries()).map(([characterId, count]) => ({
+        characterId, count, sharePct: Number(((count / totalCharSel) * 100).toFixed(1)),
+      })).sort((a, b) => b.count - a.count);
+
+      const characterShowroom = Array.from(characterShowroomMap.entries()).map(([characterId, sr]) => ({
+        characterId,
+        equippedCount: characterCounts.get(characterId) ?? 0,
+        equippedSharePct: characterPopularity.find(c => c.characterId === characterId)?.sharePct ?? 0,
+        previews: sr.previews,
+        purchases: sr.purchases,
+        abandons: sr.abandons,
+        conversionPct: sr.previews > 0 ? Number(((sr.purchases / sr.previews) * 100).toFixed(1)) : 0,
+      })).sort((a, b) => b.equippedCount - a.equippedCount);
+
+      const topFunnelCount = Math.max(1, funnelStages.cold_launch.size);
+      const journeyFunnel = [
+        { step: 'App Launch', users: funnelStages.cold_launch.size },
+        { step: 'Assets Preloaded', users: funnelStages.preload_complete.size },
+        { step: 'Authenticated', users: funnelStages.auth_complete.size },
+        { step: 'Home Reached', users: funnelStages.home_reached.size },
+        { step: 'Lobby Opened', users: funnelStages.lobby_opened.size },
+        { step: 'Queue Joined', users: funnelStages.queue_joined.size },
+        { step: 'Seated at Table', users: funnelStages.table_seated.size },
+        { step: 'Completed 1+ Hands', users: funnelStages.hand_completed.size },
+        { step: 'Tapped Play Again', users: funnelStages.play_again.size },
+      ].map((s, idx, arr) => ({
+        ...s,
+        conversionFromStartPct: Number(((s.users / topFunnelCount) * 100).toFixed(1)),
+        dropOffFromPrevPct: idx > 0 && arr[idx - 1].users > 0 ? Number((((arr[idx - 1].users - s.users) / arr[idx - 1].users) * 100).toFixed(1)) : 0,
+      }));
+
+      const totalLeaves = Math.max(1, Object.values(tableLeaveReasons).reduce((a, b) => a + b, 0));
+      const tableLeaveBreakdown = Object.entries(tableLeaveReasons).map(([reason, count]) => ({
+        reason, count, sharePct: Number(((count / totalLeaves) * 100).toFixed(1)),
+      }));
+
+      return {
+        totalTrackedUsers: totalActiveUsersSet.size,
+        totalTrackedSessions: totalSessionsSet.size,
+        totalProductEvents: rows.length,
+        featureLeaderboard,
+        gameModes,
+        characterPopularity,
+        characterShowroom,
+        journeyFunnel,
+        tableLeaveBreakdown,
+        tableInsights: {
+          totalHandsCompleted,
+          turnTimeouts,
+          turnTimeoutRatePct: totalHandsCompleted > 0 ? Number(((turnTimeouts / totalHandsCompleted) * 100).toFixed(2)) : 0,
+          insufficientFundsCount,
+          purchaseAbandonedCount,
+          realtimeDisconnects,
+          realtimeStateFallbacks,
+        },
+      };
+    }
+
+    function computeVitalsFromSnapshot(snap) {
+      const rows = filterRowsByState(snap.performance_spans);
+      const grouped = new Map();
+      for (const r of rows) {
+        if (!grouped.has(r.name)) grouped.set(r.name, { durations: [], errors: 0, platforms: new Set() });
+        const g = grouped.get(r.name);
+        g.durations.push(Number(r.duration_ms || 0));
+        if (r.status !== 'ok') g.errors++;
+        g.platforms.add(r.platform);
+      }
+      const pct = (sorted, p) => sorted.length === 0 ? 0 : Math.round(sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))]);
+      const spans = Array.from(grouped.entries()).map(([name, g]) => {
+        const sorted = [...g.durations].sort((a, b) => a - b);
+        const count = sorted.length;
+        return {
+          name, count, platforms: Array.from(g.platforms),
+          p50Ms: pct(sorted, 50), p95Ms: pct(sorted, 95), p99Ms: pct(sorted, 99),
+          errorRatePct: count > 0 ? Number(((g.errors / count) * 100).toFixed(2)) : 0,
+        };
+      }).sort((a, b) => b.count - a.count);
+      return { spans };
+    }
+
+    function renderEdgeGateAuthPrompt(root) {
+      root.innerHTML = `
+        <div class="panel-card" style="max-width:520px;margin:40px auto;border-color:rgba(56,189,248,0.4);">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+            <div class="brand-logo">C</div>
+            <div>
+              <div class="panel-title">Minamo Cortex · Supabase Edge Gate</div>
+              <div class="panel-subtitle">Direct serverless connection to ${escapeHtml(state.environment.toUpperCase())} (${escapeHtml(getEdgeUrl(state.environment))})</div>
+            </div>
+          </div>
+          ${state.edgeLastError ? `<div style="background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.35);color:#fda4af;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:14px;">${escapeHtml(state.edgeLastError)}</div>` : ''}
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Owner Master Key (CORTEX_OWNER_KEY)</label>
+          <input id="inlineOwnerKeyInput" type="password" value="${escapeHtml(state.ownerKey)}" placeholder="Enter your CORTEX_OWNER_KEY..." style="width:100%;padding:11px 13px;border-radius:8px;border:1px solid var(--border);background:#080c14;color:var(--text);font-size:14px;margin-bottom:14px;" />
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button class="btn primary" onclick="saveEdgeGateKeyFromInline()">Unlock & Connect</button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function saveEdgeGateKeyFromInline() {
+      const val = document.getElementById('inlineOwnerKeyInput')?.value?.trim() || '';
+      state.ownerKey = val;
+      localStorage.setItem('cortex_owner_key', val);
+      state.edgeSnapCache = null;
+      await loadVersions();
+      await refreshActiveTab();
+    }
+
+    function openEdgeGateDrawer() {
+      const container = document.getElementById('edgeGateContent');
+      container.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+          <div>
+            <h2 style="font-size:18px;">🔑 Supabase Edge Gate & PWA Settings</h2>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px;">Connect directly to Supabase Edge Functions from anywhere in the world (Desktop or iPhone Home Screen PWA)</div>
+          </div>
+          <button class="btn" onclick="closeEdgeGateDrawer()">Close</button>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-title" style="margin-bottom:8px;">Data Source Mode</div>
+          <div style="display:flex;gap:8px;margin-bottom:16px;">
+            <button class="btn ${state.dataSource !== 'edge' ? 'primary' : ''}" onclick="setDataSourceMode('local_server')">Local Node Server (/api)</button>
+            <button class="btn ${state.dataSource === 'edge' ? 'primary' : ''}" onclick="setDataSourceMode('edge')">Supabase Edge Gate (Worldwide Serverless)</button>
+          </div>
+
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">CORTEX_OWNER_KEY (Stored locally on this device)</label>
+          <input id="drawerOwnerKeyInput" type="password" value="${escapeHtml(state.ownerKey)}" placeholder="Enter CORTEX_OWNER_KEY..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:#080c14;color:var(--text);font-size:13px;margin-bottom:14px;" />
+
+          <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:14px;">
+            <strong>Configured Edge Gate Endpoints:</strong><br/>
+            • <strong>Production:</strong> <code>${escapeHtml(getEdgeUrl('production'))}</code><br/>
+            • <strong>Staging:</strong> <code>${escapeHtml(getEdgeUrl('staging'))}</code><br/>
+            • <strong>Local:</strong> <code>${escapeHtml(getEdgeUrl('local'))}</code>
+          </div>
+
+          <div style="display:flex;gap:8px;">
+            <button class="btn primary" onclick="saveEdgeGateSettings()">Save & Reconnect</button>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-title" style="margin-bottom:6px;">📱 Install on iPhone Home Screen (iOS App Mode)</div>
+          <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
+            1. Open your hosted Cortex URL (e.g. <code>https://minamopoker.com/cortex/</code>) in <strong>Safari on iOS</strong>.<br/>
+            2. Tap the <strong>Share</strong> button at the bottom of Safari and choose <strong>Add to Home Screen</strong>.<br/>
+            3. Launch <strong>Minamo Cortex</strong> from your iPhone Home Screen in full-screen standalone mode and enter your <code>CORTEX_OWNER_KEY</code> once.
+          </div>
+        </div>
+      `;
+      document.getElementById('edgeGateBackdrop').classList.add('open');
+    }
+
+    function closeEdgeGateDrawer() {
+      document.getElementById('edgeGateBackdrop').classList.remove('open');
+    }
+
+    async function setDataSourceMode(mode) {
+      state.dataSource = mode;
+      localStorage.setItem('cortex_data_source', mode);
+      state.edgeSnapCache = null;
+      openEdgeGateDrawer();
+      await loadVersions();
+      await refreshActiveTab();
+    }
+
+    async function saveEdgeGateSettings() {
+      const val = document.getElementById('drawerOwnerKeyInput')?.value?.trim() || '';
+      state.ownerKey = val;
+      localStorage.setItem('cortex_owner_key', val);
+      state.edgeSnapCache = null;
+      closeEdgeGateDrawer();
+      await loadVersions();
+      await refreshActiveTab();
+    }
+
+    async function loadVersions() {
+      let versions = [];
+      if (state.dataSource === 'edge') {
+        const snap = await fetchEdgeSnapshot();
+        if (snap) {
+          const vSet = new Set();
+          for (const s of (snap.sessions || [])) {
+            if ((state.platform === 'all' || s.platform === state.platform) && s.app_version) {
+              vSet.add(String(s.app_version));
+            }
+          }
+          versions = Array.from(vSet).sort((a, b) => b.localeCompare(a));
+        }
+      } else {
+        const res = await fetch(`/api/versions?environment=${state.environment}&platform=${state.platform}`);
+        const data = await res.json();
+        versions = data.versions || [];
+      }
+
+      const select = document.getElementById('versionSelect');
+      const prev = state.appVersion;
+      select.innerHTML = `<option value="all">All Versions</option>` +
+        versions.map(v => `<option value="${escapeHtml(v)}" ${v === prev ? 'selected' : ''}>v${escapeHtml(v)}</option>`).join('');
+
+      const compSelect = document.getElementById('compareVersionSelect');
+      const prevComp = state.compareVersion;
+      compSelect.innerHTML = `<option value="all">Compare: Auto (Prev)</option>` +
+        versions.map(v => `<option value="${escapeHtml(v)}" ${v === prevComp ? 'selected' : ''}>vs v${escapeHtml(v)}</option>`).join('');
+    }
+
+    function updateBanner() {
+      document.body.setAttribute('data-env', state.environment);
+      const platLabel = state.platform === 'all' ? 'All Platforms (iOS + Android + Backend)' : state.platform.toUpperCase();
+      const verLabel = state.appVersion === 'all' ? 'All Versions' : `v${state.appVersion}`;
+      const modeBadge = state.dataSource === 'edge' ? '⚡ Supabase Edge Gate (Serverless PWA)' : '🖥️ Local SQLite Server';
+      document.getElementById('envBannerText').textContent =
+        `Active Environment: ${state.environment.toUpperCase()} · ${platLabel} · ${verLabel}`;
+      const modeEl = document.getElementById('envBannerMode');
+      if (modeEl) modeEl.textContent = `${modeBadge} · Zero Third-Party SDKs`;
+    }
+
+    function switchTab(tabName) {
+      state.activeTab = tabName;
+      document.querySelectorAll('#navTabs .nav-tab').forEach(t => {
+        t.classList.toggle('active', t.getAttribute('data-tab') === tabName);
+      });
+      refreshActiveTab();
+    }
+
+    function handleActionChipClick(targetTab, targetId) {
+      if (targetId && targetTab === 'triage') {
+        openIssueDetail(targetId);
+      } else {
+        switchTab(targetTab);
+      }
+    }
+
+    async function refreshActiveTab() {
+      updateBanner();
+      const root = document.getElementById('viewRoot');
+
+      if (state.dataSource === 'edge') {
+        const snap = await fetchEdgeSnapshot();
+        if (!snap) {
+          renderEdgeGateAuthPrompt(root);
+          return;
+        }
+        const issues = filterRowsByState(snap.issues, false);
+        const reports = filterRowsByState(snap.bug_reports, false).map(r => ({
+          ...r,
+          screenshot_base64: r.screenshot_base64 && !String(r.screenshot_base64).startsWith('data:image/')
+            ? `data:image/png;base64,${r.screenshot_base64}`
+            : r.screenshot_base64,
+        }));
+        document.getElementById('triageBadge').textContent = String(issues.filter(i => i.status !== 'resolved').length);
+        document.getElementById('inboxBadge').textContent = String(reports.filter(r => r.status === 'open').length);
+
+        if (state.activeTab === 'pulse') renderPulse(root, computePulseFromSnapshot(snap));
+        else if (state.activeTab === 'radar') renderRadar(root, computeRadarFromSnapshot(snap));
+        else if (state.activeTab === 'triage') renderTriage(root, { issues });
+        else if (state.activeTab === 'vitals') renderVitals(root, computeVitalsFromSnapshot(snap));
+        else if (state.activeTab === 'inbox') renderInbox(root, { reports });
+        return;
+      }
+
+      // Update badges in background
+      fetch(`/api/triage?${queryStr()}`).then(r => r.json()).then(d => {
+        const openCount = (d.issues || []).filter(i => i.status !== 'resolved').length;
+        document.getElementById('triageBadge').textContent = String(openCount);
+      }).catch(() => {});
+      fetch(`/api/inbox?${queryStr()}`).then(r => r.json()).then(d => {
+        const openCount = (d.reports || []).filter(i => i.status === 'open').length;
+        document.getElementById('inboxBadge').textContent = String(openCount);
+      }).catch(() => {});
+
+      if (state.activeTab === 'pulse') {
+        const res = await fetch(`/api/pulse?${queryStr()}`);
+        const data = await res.json();
+        renderPulse(root, data);
+      } else if (state.activeTab === 'radar') {
+        const res = await fetch(`/api/radar?${queryStr()}`);
+        const data = await res.json();
+        renderRadar(root, data);
+      } else if (state.activeTab === 'triage') {
+        const res = await fetch(`/api/triage?${queryStr()}`);
+        const data = await res.json();
+        renderTriage(root, data);
+      } else if (state.activeTab === 'vitals') {
+        const res = await fetch(`/api/vitals?${queryStr()}`);
+        const data = await res.json();
+        renderVitals(root, data);
+      } else if (state.activeTab === 'inbox') {
+        const res = await fetch(`/api/inbox?${queryStr()}`);
+        const data = await res.json();
+        renderInbox(root, data);
+      }
+    }
+
+    function renderPulse(root, data) {
+      const s = data.summary;
+      const briefing = data.briefing || { status: 'healthy', headline: 'All Systems Healthy', actionItems: [] };
+      const comp = data.versionComparison;
+      const cfColor = s.crashFreeSessionsPct >= 99.5 ? 'var(--green)' : s.crashFreeSessionsPct >= 98 ? 'var(--amber)' : 'var(--red)';
+      const statusDotColor = briefing.status === 'healthy' ? 'var(--green)' : briefing.status === 'warning' ? 'var(--amber)' : 'var(--red)';
+
+      const compHtml = comp ? `
+        <div class="panel-card" style="border-color:rgba(56,189,248,0.35);">
+          <div class="panel-header" style="margin-bottom:12px;">
+            <div>
+              <div class="panel-title">Version-over-Version Comparison: <span style="color:var(--accent)">v${escapeHtml(comp.currentVersion)}</span> vs. <span style="color:var(--muted)">v${escapeHtml(comp.previousVersion)}</span></div>
+              <div class="panel-subtitle">Direct release health, session depth, and startup latency delta against baseline build</div>
+            </div>
+          </div>
+          <div class="kpi-grid" style="margin-bottom:0;">
+            <div class="kpi-card" style="padding:14px;">
+              <div class="kpi-label">Crash-Free Rate Delta</div>
+              <div style="display:flex;align-items:baseline;gap:10px;">
+                <div class="kpi-value" style="font-size:22px;">${comp.current.crashFreePct}%</div>
+                <span class="delta-badge ${comp.deltas.crashFreePctDelta >= 0 ? 'good' : 'bad'}">
+                  ${comp.deltas.crashFreePctDelta >= 0 ? '+' : ''}${comp.deltas.crashFreePctDelta}% vs v${escapeHtml(comp.previousVersion)}
+                </span>
+              </div>
+              <div class="kpi-sub">Baseline v${escapeHtml(comp.previousVersion)}: ${comp.previous.crashFreePct}%</div>
+            </div>
+            <div class="kpi-card" style="padding:14px;">
+              <div class="kpi-label">Avg Session Length Delta</div>
+              <div style="display:flex;align-items:baseline;gap:10px;">
+                <div class="kpi-value" style="font-size:22px;">${Math.floor(comp.current.avgSessionSec / 60)}m ${comp.current.avgSessionSec % 60}s</div>
+                <span class="delta-badge ${comp.deltas.avgSessionSecDelta >= 0 ? 'good' : 'neutral'}">
+                  ${comp.deltas.avgSessionSecDelta >= 0 ? '+' : ''}${comp.deltas.avgSessionSecDelta}s
+                </span>
+              </div>
+              <div class="kpi-sub">Baseline v${escapeHtml(comp.previousVersion)}: ${Math.floor(comp.previous.avgSessionSec / 60)}m ${comp.previous.avgSessionSec % 60}s</div>
+            </div>
+            <div class="kpi-card" style="padding:14px;">
+              <div class="kpi-label">Cold Start / Preload Latency</div>
+              <div style="display:flex;align-items:baseline;gap:10px;">
+                <div class="kpi-value" style="font-size:22px;">${comp.current.avgStartupMs} ms</div>
+                <span class="delta-badge ${comp.deltas.startupMsDelta <= 0 ? 'good' : 'bad'}">
+                  ${comp.deltas.startupMsDelta > 0 ? '+' : ''}${comp.deltas.startupMsDelta} ms
+                </span>
+              </div>
+              <div class="kpi-sub">Baseline v${escapeHtml(comp.previousVersion)}: ${comp.previous.avgStartupMs} ms</div>
+            </div>
+            <div class="kpi-card" style="padding:14px;">
+              <div class="kpi-label">New Unresolved Issues in v${escapeHtml(comp.currentVersion)}</div>
+              <div style="display:flex;align-items:baseline;gap:10px;">
+                <div class="kpi-value" style="font-size:22px;color:${comp.deltas.newIssuesInCurrent > 0 ? 'var(--amber)' : 'var(--green)'};">${comp.deltas.newIssuesInCurrent}</div>
+                <span class="delta-badge ${comp.deltas.newIssuesInCurrent === 0 ? 'good' : 'bad'}">
+                  ${comp.deltas.newIssuesInCurrent === 0 ? 'Clean Release' : 'Needs Triage'}
+                </span>
+              </div>
+              <div class="kpi-sub">${comp.current.sessions} sessions on v${escapeHtml(comp.currentVersion)}</div>
+            </div>
+          </div>
+        </div>
+      ` : '';
+
+      root.innerHTML = `
+        <!-- 1. Plain-English Morning Briefing Banner -->
+        <div class="briefing-card ${escapeHtml(briefing.status)}">
+          <div class="briefing-header">
+            <div class="briefing-title">
+              <span style="width:10px;height:10px;border-radius:50%;background:${statusDotColor};box-shadow:0 0 10px ${statusDotColor};display:inline-block;"></span>
+              <span>Morning Briefing: ${escapeHtml(briefing.headline)}</span>
+            </div>
+            <span style="font-size:11px;color:var(--muted);">Click any action item below to jump straight to root cause</span>
+          </div>
+          ${(briefing.actionItems && briefing.actionItems.length > 0) ? `
+            <div class="action-items-row">
+              ${briefing.actionItems.map(item => `
+                <div class="action-chip" onclick="handleActionChipClick('${escapeHtml(item.targetTab)}', ${item.targetId || 0})">
+                  <span class="pill ${item.severity === 'critical' ? 'regressed' : item.severity === 'warning' ? 'unresolved' : 'healthy'}">${escapeHtml(item.label)}</span>
+                  <span style="color:var(--text-secondary)">${escapeHtml(item.detail)}</span>
+                  <span style="color:var(--accent);font-weight:700;">→</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Crash-Free Sessions</div>
+            <div class="kpi-value" style="color: ${cfColor}">${s.crashFreeSessionsPct}%</div>
+            <div class="kpi-sub">${s.totalSessions - s.crashedSessions} clean of ${s.totalSessions} sessions</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Crash-Free Players</div>
+            <div class="kpi-value" style="color: ${cfColor}">${s.crashFreeUsersPct}%</div>
+            <div class="kpi-sub">${s.activeUsers} active players in window</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Avg Session Length</div>
+            <div class="kpi-value">${Math.floor(s.avgSessionSec / 60)}m ${s.avgSessionSec % 60}s</div>
+            <div class="kpi-sub">Across ${s.totalSessions} tracked sessions</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Sessions With Logged Error</div>
+            <div class="kpi-value">${s.erroredSessions}</div>
+            <div class="kpi-sub">${s.crashedSessions} fatal crashes</div>
+          </div>
+        </div>
+
+        ${compHtml}
+
+        <div class="grid-2">
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Release & Version Health</div>
+                <div class="panel-subtitle">Adoption share, crash-free rate, and error volume per release</div>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Version</th>
+                  <th>Platform</th>
+                  <th>Adoption</th>
+                  <th>Sessions</th>
+                  <th>Crash-Free</th>
+                  <th>Errors</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(data.versionBreakdown || []).map(v => `
+                  <tr>
+                    <td><strong>v${escapeHtml(v.appVersion)}</strong></td>
+                    <td><span class="pill ${escapeHtml(v.platform)}">${escapeHtml(v.platform)}</span></td>
+                    <td>
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <div class="bar-track" style="width:70px;"><div class="bar-fill" style="width:${v.adoptionPct}%;background:var(--accent);"></div></div>
+                        <span>${v.adoptionPct}%</span>
+                      </div>
+                    </td>
+                    <td>${v.sessions} <span style="color:var(--muted)">(${v.users} users)</span></td>
+                    <td style="color:${v.crashFreePct >= 99.5 ? 'var(--green)' : 'var(--amber)'};font-weight:700;">${v.crashFreePct}%</td>
+                    <td>${v.totalErrors}</td>
+                  </tr>
+                `).join('') || '<tr><td colspan="6" style="color:var(--muted)">No sessions recorded for this filter.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Top Active Issues & Regressions</div>
+                <div class="panel-subtitle">Click any issue to inspect symbolicated stacktrace & player journey storyboard</div>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Issue</th>
+                  <th>Platform</th>
+                  <th>Events</th>
+                  <th>Users</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(data.topIssues || []).map(iss => `
+                  <tr class="clickable-row" onclick="openIssueDetail(${iss.id})">
+                    <td>
+                      <div style="font-weight:600;color:var(--text);">${escapeHtml(iss.title)}</div>
+                      <div style="font-size:11px;color:var(--muted);">First: v${escapeHtml(iss.first_seen_version)} · Last: v${escapeHtml(iss.last_seen_version)}</div>
+                    </td>
+                    <td><span class="pill ${escapeHtml(iss.platform)}">${escapeHtml(iss.platform)}</span></td>
+                    <td><strong>${iss.events_count}</strong></td>
+                    <td>${iss.affected_users_count}</td>
+                    <td><span class="pill ${escapeHtml(iss.status)}">${escapeHtml(iss.status)}</span></td>
+                  </tr>
+                `).join('') || '<tr><td colspan="5" style="color:var(--green)">Zero unresolved issues in this environment!</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderRadar(root, data) {
+      const features = data.featureLeaderboard || [];
+      const showroom = data.characterShowroom || [];
+      const leaveBreakdown = data.tableLeaveBreakdown || [];
+      const insights = data.tableInsights || {};
+
+      root.innerHTML = `
+        <!-- Visual App Heatmap of Minamo Poker Hub -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Visual App Engagement Heatmap — Hot Zones vs. Dead Zones</div>
+              <div class="panel-subtitle">Spatial view of all 13 Minamo Poker Home panels color-coded by player reach, dwell time, and meaningful interaction</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <span class="pill loved">Loved (≥45% DAU)</span>
+              <span class="pill healthy">Healthy</span>
+              <span class="pill underused">Underused</span>
+              <span class="pill ignored">Dead Zone (&lt;12% DAU)</span>
+            </div>
+          </div>
+          <div class="app-map-grid">
+            ${features.map(f => {
+              const barColor = f.status === 'loved' ? 'var(--green)' : f.status === 'healthy' ? 'var(--accent)' : f.status === 'underused' ? 'var(--amber)' : 'var(--red)';
+              return `
+                <div class="map-node ${escapeHtml(f.status)}">
+                  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                    <span style="font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:700;">${escapeHtml(f.group)}</span>
+                    <span class="pill ${escapeHtml(f.status)}" style="font-size:9px;padding:2px 6px;">${escapeHtml(f.status)}</span>
+                  </div>
+                  <div style="font-weight:700;font-size:14px;margin-bottom:8px;">${escapeHtml(f.label)}</div>
+                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;">
+                    <span style="color:var(--text-secondary)">Reach: <strong style="color:var(--text)">${f.dauSharePct}% DAU</strong></span>
+                    <span style="color:var(--muted)">${f.avgDwellSec}s dwell</span>
+                  </div>
+                  <div class="bar-track" style="height:6px;margin-bottom:6px;">
+                    <div class="bar-fill" style="width:${Math.min(100, f.dauSharePct)}%;background:${barColor};"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);">
+                    <span>${f.opens} opens (${f.opensPerUser}/user)</span>
+                    <span>${f.interactionRatePct}% interact</span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Poker, Roster & Showroom Conversion Insights -->
+        <div class="grid-2">
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Character Roster & Showroom Conversion Leaderboard</div>
+                <div class="panel-subtitle">Compares equipped play share vs. Showroom previews and purchases for Anya, Amara, Brutus, and Lenny</div>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Character</th>
+                  <th>Equipped Share</th>
+                  <th>Showroom Previews</th>
+                  <th>Purchases</th>
+                  <th>Preview → Buy</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${showroom.map(c => `
+                  <tr>
+                    <td><strong style="text-transform:capitalize;font-size:14px;">${escapeHtml(c.characterId)}</strong></td>
+                    <td>
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <div class="bar-track" style="width:75px;"><div class="bar-fill" style="width:${c.sharePct}%;background:var(--accent);"></div></div>
+                        <strong>${c.sharePct}%</strong>
+                      </div>
+                    </td>
+                    <td>${c.previews}</td>
+                    <td><strong>${c.purchases}</strong> <span style="color:var(--muted);font-size:11px;">(${c.abandons} abandoned)</span></td>
+                    <td><span class="pill ${c.conversionPct >= 20 ? 'loved' : 'healthy'}">${c.conversionPct}%</span></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+
+            <div style="margin-top:20px;">
+              <div style="font-size:12px;font-weight:700;margin-bottom:8px;">Expression Set Usage Share Across All Characters</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;">
+                ${(data.expressionPopularity || []).map(e => `
+                  <div style="background:#080c14;border:1px solid var(--border-subtle);border-radius:8px;padding:8px 10px;">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+                      <strong style="text-transform:capitalize">${escapeHtml(e.setKey)}</strong>
+                      <span style="color:var(--purple);font-weight:700;">${e.sharePct}%</span>
+                    </div>
+                    <div class="bar-track" style="height:5px;"><div class="bar-fill" style="width:${e.sharePct}%;background:var(--purple);"></div></div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+
+          <!-- Table Depth, Why Players Leave & Economy Friction -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Poker Table Depth & Why Players Leave Tables</div>
+                <div class="panel-subtitle">Distinguishes clean voluntary exits from chip bust-outs, turn timeout kicks, and socket drops</div>
+              </div>
+            </div>
+
+            <div style="margin-bottom:18px;">
+              ${leaveBreakdown.map(l => {
+                const labelMap = {
+                  voluntary: 'Voluntary Stand Up / Leave',
+                  busted_chips: 'Busted Out of Chips (0 Stack)',
+                  timeout_kicked: 'Kicked for Turn Inactivity / AFK',
+                  disconnected: 'Realtime Socket Disconnect',
+                };
+                const colorMap = {
+                  voluntary: 'var(--green)',
+                  busted_chips: 'var(--amber)',
+                  timeout_kicked: 'var(--purple)',
+                  disconnected: 'var(--red)',
+                };
+                return `
+                  <div style="margin-bottom:10px;">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+                      <strong>${escapeHtml(labelMap[l.reason] || l.reason)}</strong>
+                      <span><strong>${l.sharePct}%</strong> (${l.count} tables)</span>
+                    </div>
+                    <div class="bar-track"><div class="bar-fill" style="width:${l.sharePct}%;background:${colorMap[l.reason] || 'var(--accent)'};"></div></div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+
+            <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:0;gap:12px;">
+              <div class="kpi-card" style="padding:12px;background:#080c14;">
+                <div class="kpi-label">Total Hands Completed</div>
+                <div class="kpi-value" style="font-size:20px;">${insights.totalHandsCompleted || 0}</div>
+                <div class="kpi-sub">Turn Timeout Rate: ${insights.turnTimeoutRatePct || 0}% (${insights.turnTimeouts || 0})</div>
+              </div>
+              <div class="kpi-card" style="padding:12px;background:#080c14;">
+                <div class="kpi-label">Out-of-Chips Friction</div>
+                <div class="kpi-value" style="font-size:20px;color:var(--amber);">${insights.insufficientFundsCount || 0}</div>
+                <div class="kpi-sub">Blocked buy-ins / store taps due to low balance</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <!-- Player Journey Funnel -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">End-to-End Player Session Funnel</div>
+                <div class="panel-subtitle">Identifies exact drop-off between Cold Launch, Matchmaking, and Play Again</div>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Stage</th>
+                  <th>Players</th>
+                  <th>Retention</th>
+                  <th>Step Drop-Off</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(data.journeyFunnel || []).map(step => `
+                  <tr>
+                    <td><strong>${escapeHtml(step.step)}</strong></td>
+                    <td>${step.users}</td>
+                    <td>
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <div class="bar-track" style="width:90px;"><div class="bar-fill" style="width:${step.conversionFromStartPct}%;background:var(--indigo);"></div></div>
+                        <span>${step.conversionFromStartPct}%</span>
+                      </div>
+                    </td>
+                    <td style="color:${step.dropOffFromPrevPct > 20 ? 'var(--red)' : 'var(--muted)'}">
+                      ${step.dropOffFromPrevPct > 0 ? `-${step.dropOffFromPrevPct}%` : '—'}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Game Mode Comparison -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Game Modes & Matchmaking Health</div>
+                <div class="panel-subtitle">Queue wait times, cancellation rate, AI fallback share, and hands per sitting</div>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Mode</th>
+                  <th>Queue Joins</th>
+                  <th>Avg Wait</th>
+                  <th>Cancel %</th>
+                  <th>AI Fallback</th>
+                  <th>Avg Hands</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(data.gameModes || []).map(m => `
+                  <tr>
+                    <td><strong style="text-transform:uppercase">${escapeHtml(m.mode)}</strong></td>
+                    <td>${m.queueJoins}</td>
+                    <td>${m.avgWaitSec}s</td>
+                    <td style="color:${m.cancelRatePct > 15 ? 'var(--amber)' : 'var(--text-secondary)'}">${m.cancelRatePct}%</td>
+                    <td>${m.aiFallbackPct}%</td>
+                    <td><strong>${m.avgHandsPerSession}</strong></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Detailed Feature Leaderboard Table -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Complete Feature Engagement Table</div>
+              <div class="panel-subtitle">Tabular breakdown of all 13 Home expanding panels sorted by Daily Active Player reach</div>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Feature / Home Panel</th>
+                <th>Category</th>
+                <th>Player Reach (% of DAU)</th>
+                <th>Total Opens</th>
+                <th>Avg Dwell Time</th>
+                <th>Interaction Rate</th>
+                <th>Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${features.map(f => {
+                const barColor = f.status === 'loved' ? 'var(--green)' : f.status === 'healthy' ? 'var(--accent)' : f.status === 'underused' ? 'var(--amber)' : 'var(--red)';
+                return `
+                  <tr>
+                    <td><strong>${escapeHtml(f.label)}</strong> <span style="color:var(--muted);font-size:11px;">(${escapeHtml(f.panelKey)})</span></td>
+                    <td style="color:var(--text-secondary)">${escapeHtml(f.group)}</td>
+                    <td>
+                      <div style="display:flex;align-items:center;gap:10px;">
+                        <div class="bar-track" style="width:110px;"><div class="bar-fill" style="width:${Math.min(100, f.dauSharePct)}%;background:${barColor};"></div></div>
+                        <strong>${f.dauSharePct}%</strong>
+                      </div>
+                    </td>
+                    <td>${f.opens} <span style="color:var(--muted)">(${f.opensPerUser}/user)</span></td>
+                    <td>${f.avgDwellSec}s</td>
+                    <td>${f.interactionRatePct}%</td>
+                    <td><span class="pill ${f.status}">${f.status}</span></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderTriage(root, data) {
+      const issues = data.issues || [];
+      root.innerHTML = `
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Deduplicated Crash & Error Triage (${issues.length})</div>
+              <div class="panel-subtitle">Grouped deterministically by LogFingerprint & top in-app stack frame. Click any row for symbolicated stacktrace & visual player journey storyboard.</div>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Issue / Fingerprint</th>
+                <th>Platform</th>
+                <th>Category</th>
+                <th>Versions</th>
+                <th>Events</th>
+                <th>Players</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${issues.map(iss => `
+                <tr class="clickable-row" onclick="openIssueDetail(${iss.id})">
+                  <td>
+                    <div style="font-weight:700;color:var(--text);">${escapeHtml(iss.title)}</div>
+                    <div style="font-size:11px;color:var(--muted);font-family:monospace;">${escapeHtml(iss.fingerprint_key)}</div>
+                  </td>
+                  <td><span class="pill ${escapeHtml(iss.platform)}">${escapeHtml(iss.platform)}</span></td>
+                  <td>${escapeHtml(iss.category)}</td>
+                  <td>v${escapeHtml(iss.first_seen_version)} → v${escapeHtml(iss.last_seen_version)}</td>
+                  <td><strong>${iss.events_count}</strong></td>
+                  <td>${iss.affected_users_count}</td>
+                  <td><span class="pill ${escapeHtml(iss.status)}">${escapeHtml(iss.status)}</span></td>
+                </tr>
+              `).join('') || '<tr><td colspan="7" style="color:var(--muted)">No matching issues found.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderVitals(root, data) {
+      const spans = data.spans || [];
+      root.innerHTML = `
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Performance Vitals & Automatic RPC / Edge Latency (p50 / p95 / p99)</div>
+              <div class="panel-subtitle">End-to-end client timing for Cold Start, Critical Asset Preload, Supabase RPCs, Edge Functions, and Realtime WebSocket</div>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Operation / Span</th>
+                <th>Platforms</th>
+                <th>Samples</th>
+                <th>p50 (Median)</th>
+                <th>p95</th>
+                <th>p99</th>
+                <th>Failure Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${spans.map(s => `
+                <tr>
+                  <td><strong style="font-family:monospace;">${escapeHtml(s.name)}</strong></td>
+                  <td>${(s.platforms || []).map(p => `<span class="pill ${escapeHtml(p)}">${escapeHtml(p)}</span>`).join(' ')}</td>
+                  <td>${s.count}</td>
+                  <td style="color:var(--green);font-weight:700;">${s.p50Ms} ms</td>
+                  <td style="color:${s.p95Ms > 1000 ? 'var(--amber)' : 'var(--text)'};font-weight:700;">${s.p95Ms} ms</td>
+                  <td>${s.p99Ms} ms</td>
+                  <td style="color:${s.errorRatePct > 1 ? 'var(--red)' : 'var(--muted)'}">${s.errorRatePct}%</td>
+                </tr>
+              `).join('') || '<tr><td colspan="7" style="color:var(--muted)">No performance spans recorded for this filter.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderInbox(root, data) {
+      const reports = data.reports || [];
+      root.innerHTML = `
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Shake-to-Report Player & Tester Bug Reports (${reports.length})</div>
+              <div class="panel-subtitle">Captured directly from DebugReportOverlay with screenshot and pre-report player breadcrumb storyboard</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:18px;">
+            ${reports.map(r => `
+              <div style="background:#080c14;border:1px solid var(--border);border-radius:12px;padding:16px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                  <div>
+                    <strong>@${escapeHtml(r.username)}</strong>
+                    <span class="pill ${escapeHtml(r.platform)}" style="margin-left:6px;">${escapeHtml(r.platform)} v${escapeHtml(r.app_version)}</span>
+                  </div>
+                  <button class="btn" onclick="toggleReportStatus(${r.id}, '${r.status === 'open' ? 'resolved' : 'open'}')">
+                    ${r.status === 'open' ? 'Mark Resolved' : 'Reopen'}
+                  </button>
+                </div>
+                <p style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:12px;">"${escapeHtml(r.message)}"</p>
+                ${r.screenshot_base64 ? `<img src="${escapeHtml(r.screenshot_base64.startsWith('data:image/') ? r.screenshot_base64 : 'data:image/png;base64,' + r.screenshot_base64)}" style="width:100%;border-radius:8px;border:1px solid var(--border);margin-bottom:10px;" alt="Bug report screenshot" />` : ''}
+                ${(r.breadcrumbs && r.breadcrumbs.length > 0) ? `
+                  <div style="margin-bottom:10px;">
+                    <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:6px;">Player Journey Before Report:</div>
+                    <div class="journey-track" style="max-height:140px;">
+                      ${r.breadcrumbs.map(b => `
+                        <div class="journey-step">
+                          <span class="journey-dot"></span>
+                          <div style="flex:1;">
+                            <strong>[${escapeHtml(b.category)}]</strong> ${escapeHtml(b.message)}
+                          </div>
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                ` : ''}
+                <div style="font-size:11px;color:var(--muted);">
+                  Device: ${escapeHtml(r.device_model || 'Unknown')} (${escapeHtml(r.os_version || '')}) · ${new Date(r.created_at).toLocaleString()}
+                </div>
+              </div>
+            `).join('') || '<div style="color:var(--muted)">No bug reports submitted for this environment.</div>'}
+          </div>
+        </div>
+      `;
+    }
+
+    async function openIssueDetail(issueId) {
+      let data;
+      if (state.dataSource === 'edge') {
+        const snap = await fetchEdgeSnapshot();
+        if (!snap) return;
+        const iss = (snap.issues || []).find(i => Number(i.id) === Number(issueId));
+        if (!iss) return;
+        const events = (snap.error_events || []).filter(e => Number(e.issue_id) === Number(issueId));
+        const latest = events[0] || {};
+        const sid = latest.session_id;
+        const timeline = [];
+        if (sid) {
+          for (const ev of (snap.product_events || []).filter(p => p.session_id === sid)) {
+            timeline.push({ ts: ev.event_ts || ev.created_at, kind: 'scene', title: ev.name, detail: JSON.stringify(ev.properties || {}) });
+          }
+          for (const bc of (Array.isArray(latest.breadcrumbs) ? latest.breadcrumbs : [])) {
+            timeline.push({ ts: bc.ts || bc.timestamp, kind: 'breadcrumb', title: `[${bc.category || 'app'}] ${bc.message || ''}`, detail: bc.level || 'info' });
+          }
+          timeline.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+        }
+        data = { issue: iss, events, sessionTimeline: timeline };
+      } else {
+        const res = await fetch(`/api/triage/${issueId}`);
+        if (!res.ok) return;
+        data = await res.json();
+      }
+      const iss = data.issue;
+      const latest = (data.events || [])[0] || {};
+      const extra = latest.extra || {};
+      const timeline = data.sessionTimeline || [];
+      const stack = latest.symbolicated_stacktrace || latest.stacktrace || 'No stacktrace attached (logged error event)';
+      const rawDiffers = latest.symbolicated_stacktrace && latest.stacktrace && latest.symbolicated_stacktrace !== latest.stacktrace;
+
+      const formattedStack = escapeHtml(stack)
+        .split('\n')
+        .map(line => (line.includes('com.minamo.poker') || line.includes('MinamoPoker'))
+          ? `<span class="code-line-app">${line}</span>`
+          : line)
+        .join('\n');
+
+      const contextBadges = [
+        extra.currentScene ? `<span class="pill healthy">Scene: ${escapeHtml(extra.currentScene)}</span>` : '',
+        extra.currentPanel ? `<span class="pill healthy">Panel: ${escapeHtml(extra.currentPanel)}</span>` : '',
+        extra.networkType ? `<span class="pill ${extra.networkType === 'offline' ? 'regressed' : 'loved'}">Net: ${escapeHtml(extra.networkType)}</span>` : '',
+        extra.thermalState ? `<span class="pill ${extra.thermalState === 'nominal' ? 'loved' : 'unresolved'}">Thermal: ${escapeHtml(extra.thermalState)}</span>` : '',
+        typeof extra.isLowPowerMode === 'boolean' ? `<span class="pill ${extra.isLowPowerMode ? 'unresolved' : 'healthy'}">Low Power: ${extra.isLowPowerMode ? 'ON' : 'OFF'}</span>` : '',
+      ].filter(Boolean).join(' ');
+
+      const drawer = document.getElementById('issueDrawerContent');
+      drawer.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;">
+          <div>
+            <span class="pill ${escapeHtml(iss.platform)}">${escapeHtml(iss.platform)}</span>
+            <span class="pill ${escapeHtml(iss.status)}" style="margin-left:6px;">${escapeHtml(iss.status)}</span>
+            <h2 style="font-size:18px;margin-top:8px;">${escapeHtml(iss.title)}</h2>
+            <div style="font-size:12px;color:var(--muted);font-family:monospace;margin-top:4px;">Fingerprint: ${escapeHtml(iss.fingerprint_key)}</div>
+            ${contextBadges ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${contextBadges}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn primary" onclick="setIssueStatus(${iss.id}, '${iss.status === 'resolved' ? 'unresolved' : 'resolved'}', '${escapeHtml(iss.last_seen_version)}')">
+              ${iss.status === 'resolved' ? 'Reopen Issue' : 'Resolve in Next Release'}
+            </button>
+            <button class="btn" onclick="closeIssueDrawer()">Close</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px;">
+          <div class="kpi-card" style="padding:12px;">
+            <div class="kpi-label">Events</div>
+            <div class="kpi-value" style="font-size:20px;">${iss.events_count}</div>
+          </div>
+          <div class="kpi-card" style="padding:12px;">
+            <div class="kpi-label">Affected Players</div>
+            <div class="kpi-value" style="font-size:20px;">${iss.affected_users_count || 1}</div>
+          </div>
+          <div class="kpi-card" style="padding:12px;">
+            <div class="kpi-label">Latest Version</div>
+            <div class="kpi-value" style="font-size:20px;">v${escapeHtml(iss.last_seen_version)}</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong style="font-size:13px;">${rawDiffers ? 'Symbolicated Stacktrace (Auto-Deobfuscated via Mapping UUID)' : 'Stacktrace'}</strong>
+            ${latest.mapping_uuid ? `<span style="font-size:11px;color:var(--green);font-family:monospace;">Mapping UUID: ${escapeHtml(latest.mapping_uuid)}</span>` : ''}
+          </div>
+          <div class="code-block">${formattedStack}</div>
+        </div>
+
+        <!-- Visual Player Journey Storyboard -->
+        <div style="margin-bottom:18px;">
+          <strong style="font-size:13px;">Visual Player Session Storyboard (${escapeHtml(latest.session_id || 'Session')})</strong>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px;">Step-by-step reconstruction of scenes, panels, gameplay actions, and breadcrumbs leading to the error</div>
+          <div class="journey-track">
+            ${timeline.length > 0 ? timeline.map(step => `
+              <div class="journey-step ${escapeHtml(step.kind)}">
+                <span class="journey-dot"></span>
+                <div style="flex:1;">
+                  <div style="font-weight:700;color:var(--text);">${escapeHtml(step.title)}</div>
+                  ${step.detail ? `<div style="font-size:11px;color:var(--muted);">${escapeHtml(step.detail)}</div>` : ''}
+                </div>
+                <div style="font-family:monospace;font-size:11px;color:var(--muted);">${escapeHtml(step.ts ? step.ts.slice(11, 19) : '')}</div>
+              </div>
+            `).join('') : '<div style="color:var(--muted);font-size:12px;">No session steps recorded.</div>'}
+          </div>
+        </div>
+      `;
+      document.getElementById('issueDrawerBackdrop').classList.add('open');
+    }
+
+    function closeIssueDrawer() {
+      document.getElementById('issueDrawerBackdrop').classList.remove('open');
+    }
+
+    async function openLiveStreamDrawer() {
+      document.getElementById('liveStreamBackdrop').classList.add('open');
+      document.getElementById('liveStreamBtn').classList.add('live-active');
+      state.liveStreamPaused = false;
+      await refreshLiveStream();
+      if (state.liveStreamTimer) clearInterval(state.liveStreamTimer);
+      state.liveStreamTimer = setInterval(() => {
+        if (!state.liveStreamPaused) refreshLiveStream();
+      }, 2500);
+    }
+
+    function closeLiveStreamDrawer() {
+      document.getElementById('liveStreamBackdrop').classList.remove('open');
+      document.getElementById('liveStreamBtn').classList.remove('live-active');
+      if (state.liveStreamTimer) {
+        clearInterval(state.liveStreamTimer);
+        state.liveStreamTimer = null;
+      }
+    }
+
+    function toggleLiveStreamPause() {
+      state.liveStreamPaused = !state.liveStreamPaused;
+      refreshLiveStream();
+    }
+
+    function setLiveStreamFilter(filter) {
+      state.liveStreamFilter = filter;
+      refreshLiveStream();
+    }
+
+    async function refreshLiveStream() {
+      const container = document.getElementById('liveStreamContent');
+      let rawItems = [];
+      if (state.dataSource === 'edge') {
+        const snap = await fetchEdgeSnapshot(true);
+        if (snap) {
+          const evs = filterRowsByState(snap.product_events, false).slice(0, 30).map(e => ({
+            streamType: 'event', title: e.name, platform: e.platform, appVersion: e.app_version, meta: e.properties || {}, ts: e.event_ts || e.created_at,
+          }));
+          const sps = filterRowsByState(snap.performance_spans, false).slice(0, 25).map(s => ({
+            streamType: 'span', title: s.name, platform: s.platform, appVersion: s.app_version, meta: { durationMs: s.duration_ms, status: s.status }, ts: s.created_at,
+          }));
+          const errs = filterRowsByState(snap.error_events, false).slice(0, 20).map(er => ({
+            streamType: er.is_fatal ? 'crash' : 'error', title: er.message, platform: er.platform, appVersion: er.app_version, meta: er.extra || {}, ts: er.created_at,
+          }));
+          rawItems = [...evs, ...sps, ...errs].sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || ''))).slice(0, 60);
+        }
+      } else {
+        const res = await fetch(`/api/live-stream?${queryStr()}&limit=60`);
+        if (!res.ok) return;
+        const data = await res.json();
+        rawItems = data.stream || [];
+      }
+      const filtered = state.liveStreamFilter === 'all'
+        ? rawItems
+        : rawItems.filter(it => it.streamType === state.liveStreamFilter || (state.liveStreamFilter === 'error' && it.streamType === 'crash'));
+
+      container.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap;">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="env-dot local"></span>
+              <h2 style="font-size:18px;">Live Dev Telemetry Stream (${escapeHtml(state.environment.toUpperCase())})</h2>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px;">Real-time tail of incoming analytics events, automatic RPC/Edge spans, and errors</div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn" onclick="toggleLiveStreamPause()">${state.liveStreamPaused ? '▶ Resume' : '⏸ Pause'}</button>
+            <button class="btn" onclick="closeLiveStreamDrawer()">Close</button>
+          </div>
+        </div>
+
+        <div class="segmented" style="margin-bottom:14px;">
+          <button class="${state.liveStreamFilter === 'all' ? 'active' : ''}" onclick="setLiveStreamFilter('all')">All (${rawItems.length})</button>
+          <button class="${state.liveStreamFilter === 'event' ? 'active' : ''}" onclick="setLiveStreamFilter('event')">Events</button>
+          <button class="${state.liveStreamFilter === 'span' ? 'active' : ''}" onclick="setLiveStreamFilter('span')">RPC / Spans</button>
+          <button class="${state.liveStreamFilter === 'error' ? 'active' : ''}" onclick="setLiveStreamFilter('error')">Errors & Crashes</button>
+        </div>
+
+        <div class="journey-track" style="max-height:calc(100vh - 180px);">
+          ${filtered.map(item => {
+            const kindClass = item.streamType === 'crash' || item.streamType === 'error' ? 'error' : item.streamType === 'span' ? 'gameplay' : 'scene';
+            const metaPairs = Object.entries(item.meta || {}).map(([k, v]) => `${k}=${ typeof v === 'object' ? JSON.stringify(v) : v }`).join(' · ');
+            return `
+              <div class="journey-step ${kindClass}">
+                <span class="pill ${escapeHtml(item.platform)}">${escapeHtml(item.platform)}</span>
+                <span class="pill" style="background:rgba(255,255,255,0.06);">${escapeHtml(item.streamType)}</span>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-weight:700;font-family:monospace;font-size:12px;">${escapeHtml(item.title)}</div>
+                  ${metaPairs ? `<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(metaPairs)}</div>` : ''}
+                </div>
+                <div style="font-family:monospace;font-size:11px;color:var(--muted);">v${escapeHtml(item.appVersion)} · ${escapeHtml(item.ts ? item.ts.slice(11, 19) : '')}</div>
+              </div>
+            `;
+          }).join('') || '<div style="color:var(--muted)">No live stream items matching filter.</div>'}
+        </div>
+      `;
+    }
+
+    async function setIssueStatus(issueId, status, version) {
+      if (state.dataSource === 'edge') {
+        await fetch(getEdgeUrl(state.environment), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${state.ownerKey}`,
+            'x-cortex-owner-key': state.ownerKey,
+          },
+          body: JSON.stringify({ action: 'update_issue_status', issueId, status, resolvedInVersion: version }),
+        });
+        state.edgeSnapCache = null;
+      } else {
+        await fetch(`/api/triage/${issueId}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status, resolvedInVersion: version }),
+        });
+      }
+      closeIssueDrawer();
+      refreshActiveTab();
+    }
+
+    async function toggleReportStatus(reportId, status) {
+      if (state.dataSource === 'edge') {
+        await fetch(getEdgeUrl(state.environment), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${state.ownerKey}`,
+            'x-cortex-owner-key': state.ownerKey,
+          },
+          body: JSON.stringify({ action: 'update_report_status', reportId, status }),
+        });
+        state.edgeSnapCache = null;
+      } else {
+        await fetch(`/api/inbox/${reportId}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+      }
+      refreshActiveTab();
+    }
+
+    async function syncSupabaseNow() {
+      const btn = document.getElementById('syncBtn');
+      const bannerText = document.getElementById('envBannerText');
+      const originalLabel = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '⟳ Syncing...';
+      try {
+        if (state.dataSource === 'edge') {
+          state.edgeSnapCache = null;
+          await loadVersions();
+          await refreshActiveTab();
+          bannerText.textContent = `✓ Refreshed live ${state.environment.toUpperCase()} snapshot from Supabase Edge Gate (${new Date().toLocaleTimeString()})`;
+          btn.innerHTML = '✓ Synced';
+          return;
+        }
+        const res = await fetch(`/api/sync?environment=${encodeURIComponent(state.environment)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ environment: state.environment }),
+        });
+        const data = await res.json();
+        const envResult = (data.environments || [])[0];
+        await loadVersions();
+        await refreshActiveTab();
+        if (envResult && envResult.status === 'synced') {
+          const c = envResult.counts || {};
+          const added = (c.sessions || 0) + (c.errorEvents || 0) + (c.productEvents || 0) + (c.performanceSpans || 0) + (c.bugReports || 0);
+          bannerText.textContent = `✓ Synced ${state.environment.toUpperCase()} from ${envResult.url} (${added} new records pulled at ${new Date().toLocaleTimeString()})`;
+          btn.innerHTML = '✓ Synced';
+        } else if (envResult && envResult.status === 'skipped') {
+          bannerText.textContent = `ℹ️ ${state.environment.toUpperCase()} Sync: ${envResult.reason}`;
+          btn.innerHTML = '⟳ Configure Key';
+        } else if (envResult && envResult.status === 'error') {
+          bannerText.textContent = `⚠️ ${state.environment.toUpperCase()} Sync Error: ${envResult.reason}`;
+          btn.innerHTML = '⚠️ Sync Failed';
+        }
+      } catch (err) {
+        btn.innerHTML = '⚠️ Sync Error';
+      } finally {
+        btn.disabled = false;
+        setTimeout(() => {
+          btn.innerHTML = originalLabel;
+        }, 3500);
+      }
+    }
+
+    // Wire interactive controls
+    document.querySelectorAll('#envSelector button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        document.querySelectorAll('#envSelector button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.environment = btn.getAttribute('data-env');
+        state.appVersion = 'all';
+        state.compareVersion = 'all';
+        state.edgeSnapCache = null;
+        await loadVersions();
+        refreshActiveTab();
+      });
+    });
+
+    document.querySelectorAll('#platformSelector button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        document.querySelectorAll('#platformSelector button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.platform = btn.getAttribute('data-platform');
+        state.appVersion = 'all';
+        state.compareVersion = 'all';
+        await loadVersions();
+        refreshActiveTab();
+      });
+    });
+
+    document.getElementById('versionSelect').addEventListener('change', (e) => {
+      state.appVersion = e.target.value;
+      refreshActiveTab();
+    });
+
+    document.getElementById('compareVersionSelect').addEventListener('change', (e) => {
+      state.compareVersion = e.target.value;
+      refreshActiveTab();
+    });
+
+    document.getElementById('windowSelect').addEventListener('change', (e) => {
+      state.windowHours = Number(e.target.value);
+      state.edgeSnapCache = null;
+      refreshActiveTab();
+    });
+
+    document.querySelectorAll('#navTabs .nav-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        switchTab(tab.getAttribute('data-tab'));
+      });
+    });
+
+    document.getElementById('issueDrawerBackdrop').addEventListener('click', (e) => {
+      if (e.target.id === 'issueDrawerBackdrop') closeIssueDrawer();
+    });
+
+    document.getElementById('liveStreamBackdrop').addEventListener('click', (e) => {
+      if (e.target.id === 'liveStreamBackdrop') closeLiveStreamDrawer();
+    });
+
+    document.getElementById('edgeGateBackdrop').addEventListener('click', (e) => {
+      if (e.target.id === 'edgeGateBackdrop') closeEdgeGateDrawer();
+    });
+
+    // Auto-detect Local Node Server vs Static/PWA Edge Gate Mode on startup
+    async function initPortal() {
+      if (state.dataSource === 'auto') {
+        try {
+          const healthRes = await fetch('/api/health', { cache: 'no-store' });
+          if (healthRes.ok) {
+            state.dataSource = 'local_server';
+          } else {
+            state.dataSource = 'edge';
+          }
+        } catch {
+          state.dataSource = 'edge';
+        }
+      }
+      if (state.dataSource === 'edge') {
+        const logoutForm = document.getElementById('logoutForm');
+        if (logoutForm) {
+          logoutForm.onsubmit = (e) => {
+            e.preventDefault();
+            state.ownerKey = '';
+            localStorage.removeItem('cortex_owner_key');
+            state.edgeSnapCache = null;
+            refreshActiveTab();
+          };
+        }
+      }
+      await loadVersions();
+      await refreshActiveTab();
+    }
+
+    initPortal();
+  </script>
+</body>
+</html>
