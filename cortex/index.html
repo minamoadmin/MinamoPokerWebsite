@@ -1419,8 +1419,21 @@
     function computePulseFromSnapshot(snap) {
       const sessions = filterRowsByState(snap.sessions);
       const allEnvSessions = filterRowsByState(snap.sessions, false);
-      const issues = filterRowsByState(snap.issues, false);
+      const rawIssues = filterRowsByState(snap.issues, false);
       const allEnvSpans = filterRowsByState(snap.performance_spans, false);
+      const allEnvErrors = filterRowsByState(snap.error_events, false);
+
+      const issueUsersMap = new Map();
+      for (const err of allEnvErrors) {
+        const iid = Number(err.issue_id);
+        if (!iid) continue;
+        if (!issueUsersMap.has(iid)) issueUsersMap.set(iid, new Set());
+        issueUsersMap.get(iid).add(err.user_id || err.install_id || err.session_id || err.id);
+      }
+      const issues = rawIssues.map(iss => ({
+        ...iss,
+        affected_users_count: Number(iss.affected_users_count) || issueUsersMap.get(Number(iss.id))?.size || 1,
+      }));
 
       const totalSessions = sessions.length;
       const crashedSessions = sessions.filter(s => s.status === 'crashed').length;
@@ -1467,7 +1480,7 @@
           const vCrashed = vs.filter(s => s.status === 'crashed').length;
           const vCf = vTotal > 0 ? Number((((vTotal - vCrashed) / vTotal) * 100).toFixed(2)) : 100;
           const vAvgSec = vTotal > 0 ? Math.round(vs.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / vTotal / 1000) : 0;
-          const vSpans = allEnvSpans.filter(sp => sp.app_version === ver && sp.name === 'app.cold_start');
+          const vSpans = allEnvSpans.filter(sp => sp.app_version === ver && ['app.cold_start', 'startup.critical_phase', 'startup.preload', 'preload.critical'].includes(sp.name));
           const vStartupMs = vSpans.length > 0 ? Math.round(vSpans.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / vSpans.length) : 0;
           return { sessions: vTotal, crashFreePct: vCf, avgSessionSec: vAvgSec, avgStartupMs: vStartupMs };
         };
@@ -1580,19 +1593,40 @@
       const handsCompletedBySession = new Map();
       const handsTableLeftBySession = new Map();
 
+      const hasExplicitPreload = rows.some(r => r.name === 'preload.completed');
+      const hasExplicitAuth = rows.some(r => r.name === 'auth.completed');
+      const extractExprToken = (raw) => {
+        const parts = String(raw || '').toLowerCase().split(/[_-\s]+/);
+        for (const p of parts) {
+          if (expressionSetCounts.has(p)) return p;
+        }
+        return null;
+      };
+
       for (const r of rows) {
         const actor = r.user_id || r.install_id || r.session_id || 'anon';
         const sk = r.session_id || actor;
         totalActiveUsersSet.add(actor);
         if (r.session_id) totalSessionsSet.add(r.session_id);
         funnelStages.cold_launch.add(actor);
+        if (!hasExplicitAuth && r.user_id) funnelStages.auth_complete.add(actor);
         const props = (r.properties && typeof r.properties === 'object') ? r.properties : {};
         if (r.name === 'preload.completed') funnelStages.preload_complete.add(actor);
         else if (r.name === 'auth.completed') funnelStages.auth_complete.add(actor);
-        else if (r.name === 'scene.viewed') {
-          if (props.scene === 'home') funnelStages.home_reached.add(actor);
+        else if (r.name === 'realtime.connected') {
+          if (!hasExplicitPreload) funnelStages.preload_complete.add(actor);
+          if (!hasExplicitAuth) funnelStages.auth_complete.add(actor);
+        } else if (r.name === 'scene.viewed') {
+          if (props.scene === 'home') {
+            if (!hasExplicitPreload) funnelStages.preload_complete.add(actor);
+            if (!hasExplicitAuth) funnelStages.auth_complete.add(actor);
+            funnelStages.home_reached.add(actor);
+          }
           if (props.scene === 'casualGame' || props.scene === 'rankedGame') funnelStages.table_seated.add(actor);
         } else if (r.name === 'panel.opened') {
+          if (!hasExplicitPreload) funnelStages.preload_complete.add(actor);
+          if (!hasExplicitAuth) funnelStages.auth_complete.add(actor);
+          funnelStages.home_reached.add(actor);
           const m = panelMetrics.get(String(props.panel || ''));
           if (m) { m.opens++; m.users.add(actor); }
           if (['casual', 'ranked', 'tournament'].includes(String(props.panel || ''))) funnelStages.lobby_opened.add(actor);
@@ -1642,15 +1676,21 @@
         } else if (r.name === 'character.selected' || r.name === 'customize.equipped') {
           const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
           if (characterCounts.has(rawChar)) characterCounts.set(rawChar, characterCounts.get(rawChar) + 1);
+          const exprTok = extractExprToken(props.setKey ?? props.set_key ?? props.itemId ?? props.item_id);
+          if (exprTok) expressionSetCounts.set(exprTok, expressionSetCounts.get(exprTok) + 1);
         } else if (r.name === 'character.expression_changed') {
           const skey = String(props.setKey ?? props.set_key ?? 'default').toLowerCase();
           if (expressionSetCounts.has(skey)) expressionSetCounts.set(skey, expressionSetCounts.get(skey) + 1);
         } else if (r.name === 'store.item_previewed') {
           const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
           if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).previews++;
+          const exprTok = extractExprToken(props.setKey ?? props.set_key ?? props.itemId ?? props.item_id);
+          if (exprTok) expressionSetCounts.set(exprTok, expressionSetCounts.get(exprTok) + 1);
         } else if (r.name === 'store.purchase_completed' || r.name === 'store.iap_completed') {
           const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
           if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).purchases++;
+          const exprTok = extractExprToken(props.setKey ?? props.set_key ?? props.itemId ?? props.item_id);
+          if (exprTok) expressionSetCounts.set(exprTok, expressionSetCounts.get(exprTok) + 1);
         } else if (r.name === 'store.purchase_abandoned') {
           purchaseAbandonedCount++;
           const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
@@ -2032,13 +2072,28 @@
           return;
         }
         setPortalUnlocked(true);
-        const issues = filterRowsByState(snap.issues, false);
-        const reports = filterRowsByState(snap.bug_reports, false).map(r => ({
-          ...r,
-          screenshot_base64: r.screenshot_base64 && !String(r.screenshot_base64).startsWith('data:image/')
-            ? `data:image/png;base64,${r.screenshot_base64}`
-            : r.screenshot_base64,
+        const allErrs = filterRowsByState(snap.error_events, false);
+        const triageUsersByIssue = new Map();
+        for (const err of allErrs) {
+          const iid = Number(err.issue_id);
+          if (!iid) continue;
+          if (!triageUsersByIssue.has(iid)) triageUsersByIssue.set(iid, new Set());
+          triageUsersByIssue.get(iid).add(err.user_id || err.install_id || err.session_id || err.id);
+        }
+        const issues = filterRowsByState(snap.issues, false).map(iss => ({
+          ...iss,
+          affected_users_count: Number(iss.affected_users_count) || triageUsersByIssue.get(Number(iss.id))?.size || 1,
         }));
+        const reports = filterRowsByState(snap.bug_reports, false).map(r => {
+          const b64 = r.screenshot_base64 ? String(r.screenshot_base64) : null;
+          const mime = b64 && b64.startsWith('/9j/') ? 'image/jpeg' : 'image/png';
+          return {
+            ...r,
+            screenshot_base64: b64 && !b64.startsWith('data:image/')
+              ? `data:${mime};base64,${b64}`
+              : b64,
+          };
+        });
         document.getElementById('triageBadge').textContent = String(issues.filter(i => i.status !== 'resolved').length);
         document.getElementById('inboxBadge').textContent = String(reports.filter(r => r.status === 'open').length);
 
@@ -2265,7 +2320,7 @@
                     </td>
                     <td><span class="pill ${escapeHtml(iss.platform)}">${escapeHtml(iss.platform)}</span></td>
                     <td><strong>${iss.events_count}</strong></td>
-                    <td>${iss.affected_users_count}</td>
+                    <td>${iss.affected_users_count ?? 1}</td>
                     <td><span class="pill ${escapeHtml(iss.status)}">${escapeHtml(iss.status)}</span></td>
                   </tr>
                 `).join('') || '<tr><td colspan="5" style="color:var(--green)">Zero unresolved issues in this environment!</td></tr>'}
@@ -2579,7 +2634,7 @@
                   <td>${escapeHtml(iss.category)}</td>
                   <td>v${escapeHtml(iss.first_seen_version)} → v${escapeHtml(iss.last_seen_version)}</td>
                   <td><strong>${iss.events_count}</strong></td>
-                  <td>${iss.affected_users_count}</td>
+                  <td>${iss.affected_users_count ?? 1}</td>
                   <td><span class="pill ${escapeHtml(iss.status)}">${escapeHtml(iss.status)}</span></td>
                 </tr>
               `).join('') || '<tr><td colspan="7" style="color:var(--muted)">No matching issues found.</td></tr>'}
