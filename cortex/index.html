@@ -710,7 +710,7 @@
     };
 
     const state = {
-      environment: 'production',
+      environment: localStorage.getItem('cortex_env') || 'staging',
       platform: 'all',
       appVersion: 'all',
       compareVersion: 'all',
@@ -726,6 +726,31 @@
       edgeSnapEnv: null,
       edgeLastError: null,
     };
+
+    function syncEnvButtonsUI() {
+      document.body.setAttribute('data-env', state.environment);
+      document.querySelectorAll('#envSelector button').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-env') === state.environment);
+      });
+    }
+
+    async function setEnvironment(env) {
+      state.environment = env;
+      localStorage.setItem('cortex_env', env);
+      state.appVersion = 'all';
+      state.compareVersion = 'all';
+      state.edgeSnapCache = null;
+      state.edgeLastError = null;
+      syncEnvButtonsUI();
+      updateBanner();
+      const keyInput = document.getElementById('inlineOwnerKeyInput');
+      if (keyInput && keyInput.value.trim()) {
+        state.ownerKey = keyInput.value.trim();
+        localStorage.setItem('cortex_owner_key', state.ownerKey);
+      }
+      await loadVersions();
+      await refreshActiveTab();
+    }
 
     function getEdgeUrl(env) {
       const custom = localStorage.getItem(`cortex_edge_url_${env}`);
@@ -786,7 +811,39 @@
         state.edgeSnapEnv = `${state.environment}:${state.windowHours}`;
         return state.edgeSnapCache;
       } catch (err) {
-        state.edgeLastError = err && err.message ? err.message : 'Could not reach Supabase Edge Gate';
+        if (state.environment === 'production') {
+          try {
+            const stagingUrl = `${getEdgeUrl('staging')}?action=snapshot&environment=staging&windowHours=${state.windowHours}`;
+            const fallbackRes = await fetch(stagingUrl, {
+              headers: {
+                Authorization: `Bearer ${state.ownerKey}`,
+                'x-cortex-owner-key': state.ownerKey,
+                Accept: 'application/json',
+              },
+            });
+            if (fallbackRes.ok) {
+              const fbBody = await fallbackRes.json().catch(() => ({}));
+              state.environment = 'staging';
+              localStorage.setItem('cortex_env', 'staging');
+              syncEnvButtonsUI();
+              updateBanner();
+              state.edgeLastError = null;
+              state.edgeSnapCache = fbBody.snapshot || {
+                sessions: [],
+                issues: [],
+                error_events: [],
+                product_events: [],
+                performance_spans: [],
+                bug_reports: [],
+              };
+              state.edgeSnapEnv = `staging:${state.windowHours}`;
+              return state.edgeSnapCache;
+            }
+          } catch {
+            // Fall through
+          }
+        }
+        state.edgeLastError = `Could not reach ${state.environment.toUpperCase()} Edge Gate (${baseUrl}). If ${state.environment.toUpperCase()} is still deploying, switch to STAGING below.`;
         return null;
       }
     }
@@ -1115,8 +1172,17 @@
             </div>
           </div>
           ${state.edgeLastError ? `<div style="background:rgba(244,63,94,0.12);border:1px solid rgba(244,63,94,0.35);color:#fda4af;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:14px;">${escapeHtml(state.edgeLastError)}</div>` : ''}
+          <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Target Environment</label>
+          <div style="display:flex;gap:8px;margin-bottom:14px;">
+            <button type="button" class="btn ${state.environment === 'staging' ? 'primary' : ''}" onclick="setEnvironment('staging')" style="flex:1;justify-content:center;">
+              <span class="env-dot staging"></span> STAGING (nxjxcqdf...)
+            </button>
+            <button type="button" class="btn ${state.environment === 'production' ? 'primary' : ''}" onclick="setEnvironment('production')" style="flex:1;justify-content:center;">
+              <span class="env-dot prod"></span> PRODUCTION (qfadvsuv...)
+            </button>
+          </div>
           <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">Owner Master Key (CORTEX_OWNER_KEY)</label>
-          <input id="inlineOwnerKeyInput" type="password" value="${escapeHtml(state.ownerKey)}" placeholder="Enter your CORTEX_OWNER_KEY..." style="width:100%;padding:11px 13px;border-radius:8px;border:1px solid var(--border);background:#080c14;color:var(--text);font-size:14px;margin-bottom:14px;" />
+          <input id="inlineOwnerKeyInput" type="password" value="${escapeHtml(state.ownerKey)}" placeholder="Enter your CORTEX_OWNER_KEY..." onkeydown="if(event.key==='Enter')saveEdgeGateKeyFromInline()" style="width:100%;padding:11px 13px;border-radius:8px;border:1px solid var(--border);background:#080c14;color:var(--text);font-size:14px;margin-bottom:14px;" />
           <div style="display:flex;gap:10px;justify-content:flex-end;">
             <button class="btn primary" onclick="saveEdgeGateKeyFromInline()">Unlock & Connect</button>
           </div>
@@ -1169,7 +1235,7 @@
         <div class="panel-card">
           <div class="panel-title" style="margin-bottom:6px;">📱 Install on iPhone Home Screen (iOS App Mode)</div>
           <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
-            1. Open your hosted Cortex URL (e.g. <code>https://minamopoker.com/cortex/</code>) in <strong>Safari on iOS</strong>.<br/>
+            1. Open your hosted Cortex URL (<code>https://minamo.co/cortex/</code>) in <strong>Safari on iOS</strong>.<br/>
             2. Tap the <strong>Share</strong> button at the bottom of Safari and choose <strong>Add to Home Screen</strong>.<br/>
             3. Launch <strong>Minamo Cortex</strong> from your iPhone Home Screen in full-screen standalone mode and enter your <code>CORTEX_OWNER_KEY</code> once.
           </div>
@@ -2212,14 +2278,7 @@
     // Wire interactive controls
     document.querySelectorAll('#envSelector button').forEach(btn => {
       btn.addEventListener('click', async () => {
-        document.querySelectorAll('#envSelector button').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        state.environment = btn.getAttribute('data-env');
-        state.appVersion = 'all';
-        state.compareVersion = 'all';
-        state.edgeSnapCache = null;
-        await loadVersions();
-        refreshActiveTab();
+        await setEnvironment(btn.getAttribute('data-env'));
       });
     });
 
@@ -2271,6 +2330,7 @@
 
     // Auto-detect Local Node Server vs Static/PWA Edge Gate Mode on startup
     async function initPortal() {
+      syncEnvButtonsUI();
       if (state.dataSource === 'auto') {
         try {
           const healthRes = await fetch('/api/health', { cache: 'no-store' });
