@@ -1,0 +1,19 @@
+MINAMO POKER — PRESS FACTS
+Updated October 26, 2026. Version 2.0.4 is publicly available on the US App Store and Google Play; Android build 14 is rolled out to 100% in all 170 enabled countries.
+
+Name: Minamo Poker: Texas Hold’em
+Developer / publisher: minamo llc
+Platforms: iOS and Android
+Genre: No-Limit Texas Hold’em, virtual chips
+Free download with optional in-app purchases. No in-game ads. Virtual chips only; no real-money gambling or cash-out.
+
+Features: casual tables; ranked ladder; weekly tournament; character hairstyles and outfits; ornamental tables. Tournament timing, eligibility and rewards are shown in the app. Ranked seasons are not being announced.
+
+iOS: https://apps.apple.com/us/app/id1518356362
+Android: https://play.google.com/store/apps/details?id=com.minamo.poker
+
+Visual provenance: The feature images are promotional compositions made from current native artwork, not screenshots of portrait gameplay. The app plays in landscape. The winning-hand clip uses a genuine iOS 2.0.4 staging capture of a debug-arranged five-way royal-flush hand: Diego wins a 250,000-chip pot, with 200,000 net gain. No cards, winner or game effects were invented in editing. The demonstration is not a typical-win or unscripted-player claim.
+
+The customization and ranked/tournament clips are promotional native-art montages; they do not simulate UI interaction. Gameplay footage is from iOS, not a native Android capture. AI tools were used during development and artwork creation.
+
+Media features integrated 2.0.4 artwork and the approved v35 icon. The gameplay uses the black palette; the red take was rejected. Both 2.0.4 store releases were verified publicly available on October 26, 2026 before distribution.
