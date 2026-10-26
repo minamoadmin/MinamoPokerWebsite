@@ -467,6 +467,44 @@
     .pill.regressed { background: rgba(244, 63, 94, 0.2); color: #fda4af; border: 1px solid rgba(244, 63, 94, 0.5); }
     .pill.resolved { background: rgba(16, 185, 129, 0.15); color: #34d399; }
 
+    /* Install channel and team markers: player classes and the mark-as-team control */
+    .pill.traffic-internal { background: rgba(168, 85, 247, 0.16); color: #c084fc; }
+    .pill.traffic-test, .pill.traffic-bot { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+    .pill.traffic-player, .pill.traffic-unreported { background: rgba(148, 163, 184, 0.12); color: var(--text-secondary); }
+    .segmented-label {
+      align-self: center;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      padding: 0 6px 0 8px;
+    }
+    .team-marker {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .team-marker code {
+      font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+      font-size: 11px;
+      color: var(--text-secondary);
+      word-break: break-all;
+    }
+    .team-marker .btn { padding: 3px 9px; font-size: 11px; }
+    .team-marker input {
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #080c14;
+      color: var(--text);
+      font-size: 11px;
+      width: 190px;
+    }
+    .team-marker-error { flex-basis: 100%; font-size: 11px; color: #fda4af; }
+    .team-marker-error:empty { display: none; }
+
     /* Horizontal Progress Bars */
     .bar-track {
       width: 100%;
@@ -754,6 +792,13 @@
         <button data-platform="backend">Backend</button>
       </div>
 
+      <!-- Test Traffic Toggle: test channels, debug builds, bots, team and test accounts -->
+      <div class="segmented" id="testTrafficSelector" title="Test channels (TestFlight, Xcode, sideload, Test Lab, debug), debug builds, and bot, team or test accounts">
+        <span class="segmented-label">Test traffic</span>
+        <button data-include-test="false" class="active">Hidden</button>
+        <button data-include-test="true">Shown</button>
+      </div>
+
       <!-- Version Filter -->
       <select class="filter-select" id="versionSelect" title="Filter Version">
         <option value="all">All Versions</option>
@@ -851,8 +896,21 @@
       settings: { label: 'Audio & Haptic Settings', group: 'Account & Config' },
     };
 
+    // Install channel and team markers (2026-10-26, MinamoPokerBE design
+    // docs/design/2026-10-26-install-channel-and-team-markers.md section 6.3): test traffic is hidden
+    // by default, and the toggle is remembered per environment (staging is mostly test traffic).
+    const TEST_INSTALL_CHANNELS = ['testflight', 'xcode', 'sideload', 'test_lab', 'debug'];
+    const HIDDEN_TRAFFIC_CLASSES = ['bot', 'internal', 'test'];
+    const TRAFFIC_CLASS_LABELS = { bot: 'Bot', internal: 'Team', player: 'Player', test: 'Tester', unreported: 'Unreported' };
+
+    function readIncludeTest(env) {
+      return localStorage.getItem(`cortex_include_test_${env}`) === 'true';
+    }
+
     const state = {
       environment: localStorage.getItem('cortex_active_env_v2') || 'demo',
+      includeTest: readIncludeTest(localStorage.getItem('cortex_active_env_v2') || 'demo'),
+      openIssueId: null,
       platform: 'all',
       appVersion: 'all',
       compareVersion: 'all',
@@ -914,6 +972,9 @@
         const app_version = i < 108 ? '2.0.2' : '2.0.1';
         const user_id = `player-${(i % 78) + 1}`;
         const install_id = `inst-${platform}-${user_id}`;
+        const install_channel = isIos
+          ? (i % 13 === 6 ? 'testflight' : 'app_store')
+          : (i % 17 === 6 ? 'test_lab' : i % 31 === 9 ? 'sideload' : 'play');
         const session_id = `sess-demo-${i + 1}`;
         const minsAgo = Math.floor((i / totalDemoSessions) * 14 * 24 * 60) + 4;
         const started_at = isoAgo(minsAgo);
@@ -926,8 +987,10 @@
           environment: 'demo',
           platform,
           app_version,
+          build_type: 'release',
           user_id,
           install_id,
+          install_channel,
           status: isCrashed ? 'crashed' : 'ended',
           started_at,
           duration_ms,
@@ -952,8 +1015,10 @@
             environment: 'demo',
             platform,
             app_version,
+            build_type: 'release',
             user_id,
             install_id,
+            install_channel,
             name,
             properties,
             event_ts: started_at,
@@ -1107,7 +1172,7 @@
         },
       ];
 
-      const error_events = [
+      const baseErrorEvents = [
         {
           id: 501,
           issue_id: 101,
@@ -1204,6 +1269,28 @@
         },
       ];
 
+      // Each issue's events_count events: the detailed one first, then earlier repeats on other
+      // sessions of its platform, some of them test channels or team accounts.
+      const error_events = [];
+      for (const base of baseErrorEvents) {
+        const issue = issues.find(iss => iss.id === base.issue_id);
+        const sessionOf = (sid) => sessions.find(s => s.session_id === sid) || {};
+        const pool = sessions.filter(s => s.platform === base.platform);
+        const fromSession = (s) => ({ user_id: s.user_id, install_id: s.install_id, install_channel: s.install_channel, build_type: s.build_type });
+        error_events.push({ ...base, ...fromSession(sessionOf(base.session_id)) });
+        for (let k = 1; k < issue.events_count; k++) {
+          const s = pool.length > 0 ? pool[(base.issue_id * 7 + k * 11) % pool.length] : sessionOf(base.session_id);
+          error_events.push({
+            ...base,
+            id: base.id * 100 + k,
+            session_id: s.session_id || base.session_id,
+            app_version: s.app_version || base.app_version,
+            ...fromSession(s),
+            created_at: new Date(Date.parse(base.created_at) - k * 97 * 60 * 1000).toISOString(),
+          });
+        }
+      }
+
       const svgCard1 = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270" viewBox="0 0 480 270"><rect width="480" height="270" rx="16" fill="#0c1424"/><ellipse cx="240" cy="135" rx="175" ry="88" fill="#133a2c" stroke="#d4af37" stroke-width="4"/><circle cx="240" cy="45" r="22" fill="#1e293b" stroke="#38bdf8" stroke-width="2"/><text x="240" y="50" text-anchor="middle" fill="#f8fafc" font-family="sans-serif" font-size="11" font-weight="bold">ANYA</text><rect x="202" y="112" width="34" height="48" rx="4" fill="#f8fafc"/><text x="219" y="142" text-anchor="middle" fill="#e11d48" font-family="sans-serif" font-size="16" font-weight="bold">A♥</text><rect x="244" y="112" width="34" height="48" rx="4" fill="#f8fafc"/><text x="261" y="142" text-anchor="middle" fill="#0f172a" font-family="sans-serif" font-size="16" font-weight="bold">K♠</text><text x="240" y="242" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="11">Shake-to-Report Snapshot · iOS v2.0.2 (13)</text></svg>`;
       const svgBase64 = 'data:image/svg+xml;utf8,' + encodeURIComponent(svgCard1);
 
@@ -1215,6 +1302,7 @@
           app_version: '2.0.2',
           device_model: 'iPhone 16 Pro',
           os_version: 'iOS 18.1',
+          user_id: 'player-3',
           username: 'cjbrasino',
           message: 'Verified Anya Spades expression set at the casual table — portrait and raise panel transition look super clean!',
           screenshot_base64: svgBase64,
@@ -1233,6 +1321,7 @@
           app_version: '2.0.2',
           device_model: 'Pixel 9 Pro',
           os_version: 'Android 15 (API 35)',
+          user_id: 'player-12',
           username: 'HighRoller99',
           message: 'Spin wheel badge showed 1 spin available after returning from background, cleared after tapping Spin panel.',
           screenshot_base64: svgBase64,
@@ -1245,7 +1334,14 @@
         },
       ];
 
-      return { sessions, issues, error_events, product_events, performance_spans, bug_reports };
+      // Player classes as the backend's user_traffic_classes() answers them; team_users holds the
+      // accounts marked as team (the owner's own, and a tester's).
+      const user_classes = {};
+      for (const s of sessions) user_classes[s.user_id] = 'player';
+      user_classes['player-14'] = 'test';
+      const team_users = { 'player-3': true, 'player-8': true };
+
+      return { sessions, issues, error_events, product_events, performance_spans, bug_reports, user_classes, team_users };
     }
 
     function getOrBuildDemoSnapshot() {
@@ -1255,15 +1351,64 @@
       return state.demoSnapCache;
     }
 
+    function demoTrafficClass(snap, userId) {
+      if (!userId) return null;
+      if (snap.team_users[userId]) return 'internal';
+      return snap.user_classes[userId] || 'unreported';
+    }
+
+    // The demo has no backend, so it hides test traffic the way get_cortex_admin_snapshot does: a
+    // test channel, a debug build, or a bot, team or test account, before any count is taken.
+    function getDemoSnapshotView() {
+      const snap = getOrBuildDemoSnapshot();
+      const isTestRow = (r, playerOnly) => HIDDEN_TRAFFIC_CLASSES.includes(r.traffic_class) ||
+        (!playerOnly && (TEST_INSTALL_CHANNELS.includes(r.install_channel) || r.build_type === 'debug'));
+      const keep = (rows, playerOnly = false) => (rows || [])
+        .map(r => ({ ...r, traffic_class: demoTrafficClass(snap, r.user_id) }))
+        .filter(r => state.includeTest || !isTestRow(r, playerOnly));
+      const sessions = keep(snap.sessions);
+      const error_events = keep(snap.error_events);
+      const issues = snap.issues.map(iss => {
+        const events = error_events.filter(e => Number(e.issue_id) === Number(iss.id));
+        return {
+          ...iss,
+          window_events_count: events.length,
+          affected_users_count: Math.max(1, new Set(events.map(e => e.user_id || e.install_id || e.session_id)).size),
+        };
+      }).filter(iss => state.includeTest || iss.window_events_count > 0);
+      return {
+        ...snap,
+        sessions,
+        error_events,
+        issues,
+        product_events: keep(snap.product_events),
+        bug_reports: keep(snap.bug_reports, true),
+        test_traffic: { included: state.includeTest, hidden_sessions: snap.sessions.length - sessions.length },
+      };
+    }
+
     function syncEnvButtonsUI() {
       document.body.setAttribute('data-env', state.environment === 'demo' ? 'local' : state.environment);
       document.querySelectorAll('#envSelector button').forEach(b => {
         b.classList.toggle('active', b.getAttribute('data-env') === state.environment);
       });
+      document.querySelectorAll('#testTrafficSelector button').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-include-test') === String(state.includeTest));
+      });
+    }
+
+    async function setIncludeTest(includeTest) {
+      state.includeTest = includeTest;
+      localStorage.setItem(`cortex_include_test_${state.environment}`, String(includeTest));
+      state.edgeSnapCache = null;
+      syncEnvButtonsUI();
+      await loadVersions();
+      await refreshActiveTab();
     }
 
     async function setEnvironment(env) {
       state.environment = env;
+      state.includeTest = readIncludeTest(env);
       localStorage.setItem('cortex_active_env_v2', env);
       state.appVersion = 'all';
       state.compareVersion = 'all';
@@ -1300,14 +1445,19 @@
         appVersion: state.appVersion,
         compareVersion: state.compareVersion,
         windowHours: String(state.windowHours),
+        includeTest: String(state.includeTest),
       });
       return p.toString();
+    }
+
+    function edgeSnapshotUrl(env) {
+      return `${getEdgeUrl(env)}?action=snapshot&environment=${encodeURIComponent(env)}&windowHours=${state.windowHours}&includeTest=${state.includeTest}`;
     }
 
     async function fetchEdgeSnapshot(forceRefresh = false) {
       if (state.environment === 'demo' && state.dataSource === 'local_server') {
         state.demoKeyVerified = true;
-        return getOrBuildDemoSnapshot();
+        return getDemoSnapshotView();
       }
       if (!state.ownerKey) {
         state.edgeLastError = null;
@@ -1336,13 +1486,13 @@
           }
         }
         state.edgeLastError = null;
-        return getOrBuildDemoSnapshot();
+        return getDemoSnapshotView();
       }
-      if (!forceRefresh && state.edgeSnapCache && state.edgeSnapEnv === `${state.environment}:${state.windowHours}`) {
+      if (!forceRefresh && state.edgeSnapCache && state.edgeSnapEnv === `${state.environment}:${state.windowHours}:${state.includeTest}`) {
         return state.edgeSnapCache;
       }
       const baseUrl = getEdgeUrl(state.environment);
-      const url = `${baseUrl}?action=snapshot&environment=${encodeURIComponent(state.environment)}&windowHours=${state.windowHours}`;
+      const url = edgeSnapshotUrl(state.environment);
       try {
         const res = await fetch(url, {
           headers: {
@@ -1366,13 +1516,12 @@
           performance_spans: [],
           bug_reports: [],
         };
-        state.edgeSnapEnv = `${state.environment}:${state.windowHours}`;
+        state.edgeSnapEnv = `${state.environment}:${state.windowHours}:${state.includeTest}`;
         return state.edgeSnapCache;
       } catch (err) {
         if (state.environment === 'production') {
           try {
-            const stagingUrl = `${getEdgeUrl('staging')}?action=snapshot&environment=staging&windowHours=${state.windowHours}`;
-            const fallbackRes = await fetch(stagingUrl, {
+            const fallbackRes = await fetch(edgeSnapshotUrl('staging'), {
               headers: {
                 Authorization: `Bearer ${state.ownerKey}`,
                 'x-cortex-owner-key': state.ownerKey,
@@ -1395,7 +1544,7 @@
                 performance_spans: [],
                 bug_reports: [],
               };
-              state.edgeSnapEnv = `staging:${state.windowHours}`;
+              state.edgeSnapEnv = `staging:${state.windowHours}:${state.includeTest}`;
               return state.edgeSnapCache;
             }
           } catch {
@@ -1414,6 +1563,22 @@
         if (includeVersion && state.appVersion !== 'all' && r.app_version && r.app_version !== state.appVersion) return false;
         return true;
       });
+    }
+
+    // An issue's lifetime events_count includes test traffic, so while it is hidden the issue lists
+    // show the window's count of the events left in, where the backend sends one.
+    function issueEventsCount(iss) {
+      return !state.includeTest && iss.window_events_count != null ? Number(iss.window_events_count) : Number(iss.events_count || 0);
+    }
+
+    function issueEventsHeader(issues) {
+      return !state.includeTest && (issues || []).some(i => i.window_events_count != null) ? 'Events in window' : 'Events';
+    }
+
+    // { included, hiddenSessions } from a snapshot's test_traffic, or null for a backend before 1.79.0.
+    function testTrafficFromSnapshot(snap) {
+      const t = snap.test_traffic;
+      return t && typeof t === 'object' ? { included: Boolean(t.included), hiddenSessions: Number(t.hidden_sessions || 0) } : null;
     }
 
     function computePulseFromSnapshot(snap) {
@@ -1506,7 +1671,7 @@
       const topIssues = [...issues].sort((a, b) => {
         if (a.status === 'regressed' && b.status !== 'regressed') return -1;
         if (b.status === 'regressed' && a.status !== 'regressed') return 1;
-        return Number(b.events_count || 0) - Number(a.events_count || 0);
+        return issueEventsCount(b) - issueEventsCount(a);
       });
 
       let status = 'healthy';
@@ -1525,7 +1690,7 @@
         actionItems.push({
           severity: iss.status === 'regressed' || iss.is_fatal ? 'critical' : 'warning',
           label: `${iss.status === 'regressed' ? 'REGRESSED' : iss.is_fatal ? 'CRASH' : 'ERROR'} · ${iss.platform.toUpperCase()}`,
-          detail: `${iss.title} (${iss.events_count} events)`,
+          detail: `${iss.title} (${issueEventsCount(iss)} events)`,
           targetTab: 'triage',
           targetId: Number(iss.id),
         });
@@ -1557,6 +1722,7 @@
         versionComparison,
         versionBreakdown,
         topIssues,
+        testTraffic: testTrafficFromSnapshot(snap),
       };
     }
 
@@ -1841,6 +2007,7 @@
     function selectAuthGateEnv(env) {
       const currentInputVal = document.getElementById('inlineOwnerKeyInput')?.value || state.ownerKey;
       state.environment = env;
+      state.includeTest = readIncludeTest(env);
       localStorage.setItem('cortex_active_env_v2', env);
       state.edgeSnapCache = null;
       state.edgeLastError = null;
@@ -2013,7 +2180,7 @@
           versions = Array.from(vSet).sort((a, b) => b.localeCompare(a));
         }
       } else {
-        const res = await fetch(`/api/versions?environment=${state.environment}&platform=${state.platform}`);
+        const res = await fetch(`/api/versions?environment=${state.environment}&platform=${state.platform}&includeTest=${state.includeTest}`);
         const data = await res.json();
         versions = data.versions || [];
       }
@@ -2235,6 +2402,9 @@
             <div class="kpi-label">Crash-Free Sessions</div>
             <div class="kpi-value" style="color: ${cfColor}">${s.crashFreeSessionsPct}%</div>
             <div class="kpi-sub">${s.totalSessions - s.crashedSessions} clean of ${s.totalSessions} sessions</div>
+            ${data.testTraffic && !data.testTraffic.included ? `
+              <div class="kpi-sub" id="testSessionsHidden">${data.testTraffic.hiddenSessions} test session${data.testTraffic.hiddenSessions === 1 ? '' : 's'} hidden</div>
+            ` : ''}
           </div>
           <div class="kpi-card">
             <div class="kpi-label">Crash-Free Players</div>
@@ -2306,7 +2476,7 @@
                 <tr>
                   <th>Issue</th>
                   <th>Platform</th>
-                  <th>Events</th>
+                  <th>${issueEventsHeader(data.topIssues)}</th>
                   <th>Users</th>
                   <th>Status</th>
                 </tr>
@@ -2319,7 +2489,7 @@
                       <div style="font-size:11px;color:var(--muted);">First: v${escapeHtml(iss.first_seen_version)} · Last: v${escapeHtml(iss.last_seen_version)}</div>
                     </td>
                     <td><span class="pill ${escapeHtml(iss.platform)}">${escapeHtml(iss.platform)}</span></td>
-                    <td><strong>${iss.events_count}</strong></td>
+                    <td><strong>${issueEventsCount(iss)}</strong></td>
                     <td>${iss.affected_users_count ?? 1}</td>
                     <td><span class="pill ${escapeHtml(iss.status)}">${escapeHtml(iss.status)}</span></td>
                   </tr>
@@ -2618,7 +2788,7 @@
                 <th>Platform</th>
                 <th>Category</th>
                 <th>Versions</th>
-                <th>Events</th>
+                <th>${issueEventsHeader(issues)}</th>
                 <th>Players</th>
                 <th>Status</th>
               </tr>
@@ -2633,7 +2803,7 @@
                   <td><span class="pill ${escapeHtml(iss.platform)}">${escapeHtml(iss.platform)}</span></td>
                   <td>${escapeHtml(iss.category)}</td>
                   <td>v${escapeHtml(iss.first_seen_version)} → v${escapeHtml(iss.last_seen_version)}</td>
-                  <td><strong>${iss.events_count}</strong></td>
+                  <td><strong>${issueEventsCount(iss)}</strong></td>
                   <td>${iss.affected_users_count ?? 1}</td>
                   <td><span class="pill ${escapeHtml(iss.status)}">${escapeHtml(iss.status)}</span></td>
                 </tr>
@@ -2723,6 +2893,11 @@
                     </div>
                   </div>
                 ` : ''}
+                ${r.user_id ? `
+                  <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">
+                    ${teamMarkerHtml(r.user_id, r.traffic_class, 'Player:')}
+                  </div>
+                ` : ''}
                 <div style="font-size:11px;color:var(--muted);">
                   Device: ${escapeHtml(r.device_model || 'Unknown')} (${escapeHtml(r.os_version || '')}) · ${new Date(r.created_at).toLocaleString()}
                 </div>
@@ -2735,11 +2910,16 @@
 
     async function openIssueDetail(issueId) {
       let data;
+      state.openIssueId = issueId;
       if (state.dataSource === 'edge' || state.environment === 'demo') {
         const snap = await fetchEdgeSnapshot();
         if (!snap) return;
         const iss = (snap.issues || []).find(i => Number(i.id) === Number(issueId));
-        if (!iss) return;
+        if (!iss) {
+          // Gone from the snapshot, e.g. every event it had is now hidden test traffic
+          closeIssueDrawer();
+          return;
+        }
         const events = (snap.error_events || []).filter(e => Number(e.issue_id) === Number(issueId));
         const latest = events[0] || {};
         const sid = latest.session_id;
@@ -2755,8 +2935,11 @@
         }
         data = { issue: iss, events, sessionTimeline: timeline };
       } else {
-        const res = await fetch(`/api/triage/${issueId}`);
-        if (!res.ok) return;
+        const res = await fetch(`/api/triage/${issueId}?${queryStr()}`);
+        if (!res.ok) {
+          closeIssueDrawer();
+          return;
+        }
         data = await res.json();
       }
       const iss = data.issue;
@@ -2801,8 +2984,8 @@
 
         <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px;">
           <div class="kpi-card" style="padding:12px;">
-            <div class="kpi-label">Events</div>
-            <div class="kpi-value" style="font-size:20px;">${iss.events_count}</div>
+            <div class="kpi-label">${issueEventsHeader([iss])}</div>
+            <div class="kpi-value" style="font-size:20px;">${issueEventsCount(iss)}</div>
           </div>
           <div class="kpi-card" style="padding:12px;">
             <div class="kpi-label">Affected Players</div>
@@ -2826,6 +3009,11 @@
         <div style="margin-bottom:18px;">
           <strong style="font-size:13px;">Visual Player Session Storyboard (${escapeHtml(latest.session_id || 'Session')})</strong>
           <div style="font-size:11px;color:var(--muted);margin-top:2px;">Step-by-step reconstruction of scenes, panels, gameplay actions, and breadcrumbs leading to the error</div>
+          ${latest.user_id ? `
+            <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">
+              ${teamMarkerHtml(latest.user_id, latest.traffic_class, 'Player:')}
+            </div>
+          ` : ''}
           <div class="journey-track">
             ${timeline.length > 0 ? timeline.map(step => `
               <div class="journey-step ${escapeHtml(step.kind)}">
@@ -2839,12 +3027,138 @@
             `).join('') : '<div style="color:var(--muted);font-size:12px;">No session steps recorded.</div>'}
           </div>
         </div>
+
+        <div style="margin-bottom:18px;">
+          <strong style="font-size:13px;">Recent Events</strong>
+          <table style="margin-top:8px;">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Version</th>
+                <th>Device</th>
+                <th>Player</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(data.events || []).slice(0, 10).map(ev => `
+                <tr>
+                  <td style="white-space:nowrap;">${escapeHtml(ev.created_at ? new Date(ev.created_at).toLocaleString() : '')}</td>
+                  <td>v${escapeHtml(ev.app_version)}${ev.install_channel ? `<div style="font-size:11px;color:var(--muted);">${escapeHtml(ev.install_channel)}</div>` : ''}</td>
+                  <td>${escapeHtml(ev.device_model || ev.platform || '')}</td>
+                  <td>${ev.user_id ? teamMarkerHtml(ev.user_id, ev.traffic_class) : '<span style="color:var(--muted)">No player</span>'}</td>
+                </tr>
+              `).join('') || '<tr><td colspan="4" style="color:var(--muted)">No events in this view.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
       `;
       document.getElementById('issueDrawerBackdrop').classList.add('open');
     }
 
     function closeIssueDrawer() {
+      state.openIssueId = null;
       document.getElementById('issueDrawerBackdrop').classList.remove('open');
+    }
+
+    // Mark as team (design section 6.4): wherever a player id appears, cortex-admin's
+    // set_user_internal marks or unmarks the account, whose traffic every snapshot then leaves out
+    // unless test traffic is shown. With test traffic hidden every row shown is a counted player's;
+    // with it shown and no class known (the snapshot carries none), both actions are offered.
+    let teamMarkerSeq = 0;
+    function teamMarkerHtml(userId, trafficClass, label = '') {
+      if (!userId) return '';
+      const id = `teamMarker${++teamMarkerSeq}`;
+      const isTeam = trafficClass === 'internal';
+      const canMark = trafficClass ? !isTeam && trafficClass !== 'bot' : true;
+      const canUnmark = trafficClass ? isTeam : state.includeTest;
+      return `
+        <span class="team-marker" id="${id}" data-user-id="${escapeHtml(userId)}">
+          ${label ? `<span>${escapeHtml(label)}</span>` : ''}
+          <code>${escapeHtml(userId)}</code>
+          ${trafficClass ? `<span class="pill traffic-${escapeHtml(trafficClass)}">${escapeHtml(TRAFFIC_CLASS_LABELS[trafficClass] || trafficClass)}</span>` : ''}
+          <span class="team-marker-actions">
+            ${canMark ? `<button type="button" class="btn" onclick="openTeamMarkForm('${id}')">Mark as team</button>` : ''}
+            ${canUnmark ? `<button type="button" class="btn" onclick="submitTeamMark('${id}', false)">Unmark</button>` : ''}
+          </span>
+          <span class="team-marker-form" hidden>
+            <input type="text" maxlength="200" placeholder="Note (optional), e.g. tester: Sam" onkeydown="if(event.key==='Enter')submitTeamMark('${id}', true)" />
+            <button type="button" class="btn primary" onclick="submitTeamMark('${id}', true)">Mark</button>
+            <button type="button" class="btn" onclick="closeTeamMarkForm('${id}')">Cancel</button>
+          </span>
+          <span class="team-marker-error"></span>
+        </span>`;
+    }
+
+    function openTeamMarkForm(markerId) {
+      const el = document.getElementById(markerId);
+      if (!el) return;
+      el.querySelector('.team-marker-actions').hidden = true;
+      el.querySelector('.team-marker-form').hidden = false;
+      el.querySelector('.team-marker-form input').focus();
+    }
+
+    function closeTeamMarkForm(markerId) {
+      const el = document.getElementById(markerId);
+      if (!el) return;
+      el.querySelector('.team-marker-actions').hidden = false;
+      el.querySelector('.team-marker-form').hidden = true;
+      el.querySelector('.team-marker-error').textContent = '';
+    }
+
+    async function submitTeamMark(markerId, internal) {
+      const el = document.getElementById(markerId);
+      if (!el) return;
+      const note = internal ? el.querySelector('.team-marker-form input').value.trim() : '';
+      const buttons = el.querySelectorAll('button');
+      buttons.forEach(b => { b.disabled = true; });
+      el.querySelector('.team-marker-error').textContent = '';
+      const userId = el.getAttribute('data-user-id');
+      const result = await setUserInternal(userId, internal, note);
+      if (!result.ok) {
+        buttons.forEach(b => { b.disabled = false; });
+        el.querySelector('.team-marker-error').textContent = result.error;
+        return;
+      }
+      if (state.environment === 'demo') {
+        await refreshActiveTab();
+      } else {
+        // Edge: a fresh snapshot. Local server: pull the new class with a sync of this environment.
+        await syncSupabaseNow();
+      }
+      const bannerText = document.getElementById('envBannerText');
+      bannerText.textContent = `✓ ${internal ? 'Marked' : 'Unmarked'} ${userId} as team. ${state.environment === 'demo' ? '' : bannerText.textContent}`.trim();
+      if (state.openIssueId) await openIssueDetail(state.openIssueId);
+    }
+
+    async function setUserInternal(userId, internal, note) {
+      if (state.environment === 'demo') {
+        const snap = getOrBuildDemoSnapshot();
+        if (internal) snap.team_users[userId] = true;
+        else delete snap.team_users[userId];
+        return { ok: true };
+      }
+      if (!state.ownerKey) {
+        return { ok: false, error: 'Enter the Cortex owner key under 🔑 Edge Gate to mark team accounts.' };
+      }
+      try {
+        const res = await fetch(getEdgeUrl(state.environment), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${state.ownerKey}`,
+            'x-cortex-owner-key': state.ownerKey,
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ action: 'set_user_internal', userId, internal, ...(note ? { note } : {}) }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return { ok: false, error: body.error || `Edge Gate returned HTTP ${res.status}` };
+        }
+        return { ok: true };
+      } catch {
+        return { ok: false, error: `Could not reach the ${state.environment.toUpperCase()} Edge Gate (${getEdgeUrl(state.environment)}).` };
+      }
     }
 
     async function openLiveStreamDrawer() {
@@ -3061,6 +3375,12 @@
         state.compareVersion = 'all';
         await loadVersions();
         refreshActiveTab();
+      });
+    });
+
+    document.querySelectorAll('#testTrafficSelector button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await setIncludeTest(btn.getAttribute('data-include-test') === 'true');
       });
     });
 
