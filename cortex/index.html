@@ -1859,8 +1859,112 @@
       };
     }
 
+    // Embedded from server/queueAttempts.js; queueAttempts.test.ts enforces parity.
+    function aggregateQueueAttempts(rows) {
+      const stats = Object.fromEntries(['casual', 'ranked', 'tourney'].map(mode => [mode, {
+        queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0,
+        waitSamples: 0, aiFallbackMatches: 0, duplicateQueueEvents: 0,
+        unmatchedQueueOutcomes: 0, invalidQueueEvents: 0,
+        incompleteQueueAttempts: 0, conflictingQueueOutcomes: 0,
+      }]));
+      const kinds = new Map([
+        ['queue.joined', 'start'], ['matchmaking.started', 'start'],
+        ['queue.cancelled', 'cancel'], ['matchmaking.cancelled', 'cancel'],
+        ['queue.matched', 'match'], ['matchmaking.seated', 'match'],
+      ]);
+      const usableId = value => {
+        const id = typeof value === 'string' ? value.trim() : '';
+        return id && !['unknown', 'sync-session', 'sync-install'].includes(id) ? id : '';
+      };
+      const events = [];
+      for (const row of rows || []) {
+        const kind = kinds.get(row.name);
+        if (!kind) continue;
+        let props = row.properties;
+        if (!props && row.properties_json) {
+          try { props = JSON.parse(row.properties_json); } catch { props = {}; }
+        }
+        if (!props || typeof props !== 'object' || Array.isArray(props)) props = {};
+        const rawMode = String(props.mode || 'casual').toLowerCase();
+        const mode = rawMode === 'tournament' ? 'tourney' : rawMode;
+        if (!Object.hasOwn(stats, mode)) continue;
+        const session = usableId(row.session_id);
+        const install = usableId(row.install_id);
+        const attemptId = usableId(props.queueAttemptId ?? props.queue_attempt_id ?? props.attemptId ?? props.attempt_id);
+        const time = Date.parse(row.event_ts || row.ts || row.created_at || '');
+        // Never join anonymous events across players or invent a start at the window boundary.
+        if ((!session && !(attemptId && install)) || !Number.isFinite(time)) {
+          stats[mode].invalidQueueEvents++;
+          continue;
+        }
+        const scope = JSON.stringify([row.environment || '', row.platform || '', install, session, mode]);
+        events.push({ kind, props, mode, scope, attemptId, time });
+      }
+
+      // Snapshots arrive newest-first; use original event time, never ingestion/array order.
+      // At equal timestamps a start precedes an outcome, and a seat wins a cancellation race.
+      const order = { start: 0, cancel: 1, match: 2 };
+      events.sort((a, b) => a.time - b.time || order[a.kind] - order[b.kind]);
+      const seen = new Set();
+      const lanes = new Map();
+      const attempts = [];
+      for (const event of events) {
+        const st = stats[event.mode];
+        // Aliases/retransmissions of the same timestamped event do not create another attempt.
+        const eventKey = JSON.stringify([event.scope, event.kind, event.time, event.attemptId]);
+        if (seen.has(eventKey)) { st.duplicateQueueEvents++; continue; }
+        seen.add(eventKey);
+        let lane = lanes.get(event.scope);
+        if (!lane) {
+          lane = { legacy: null, identified: new Map() };
+          lanes.set(event.scope, lane);
+        }
+        if (event.kind === 'start') {
+          if (event.attemptId && lane.identified.has(event.attemptId)) {
+            st.duplicateQueueEvents++;
+            continue;
+          }
+          const attempt = { mode: event.mode, start: event.time, outcome: null };
+          attempts.push(attempt);
+          if (event.attemptId) lane.identified.set(event.attemptId, attempt);
+          else lane.legacy = attempt;
+          continue;
+        }
+        const attempt = event.attemptId ? lane.identified.get(event.attemptId) : lane.legacy;
+        if (!attempt) { st.unmatchedQueueOutcomes++; continue; }
+        if (attempt.outcome) {
+          if (attempt.outcome.kind === event.kind) { st.duplicateQueueEvents++; continue; }
+          st.conflictingQueueOutcomes++;
+          // A cancel request can race with a successful join. The recorded seat is the final outcome.
+          if (attempt.outcome.kind === 'match') continue;
+        }
+        const rawWait = event.props.waitMs ?? event.props.wait_duration_ms ?? event.props.durationMs ?? event.props.duration_ms;
+        const wait = rawWait == null || rawWait === '' ? NaN : Number(rawWait);
+        attempt.outcome = {
+          kind: event.kind,
+          waitMs: Number.isFinite(wait) && wait >= 0 ? wait : event.time - attempt.start,
+          hasAi: event.props.hasAiBots === true || event.props.hasAiBots === 'true',
+        };
+      }
+      for (const attempt of attempts) {
+        const st = stats[attempt.mode];
+        st.queueJoins++;
+        const outcome = attempt.outcome;
+        if (!outcome) { st.incompleteQueueAttempts++; continue; }
+        if (outcome.kind === 'cancel') st.queueCancels++;
+        else {
+          st.queueMatches++;
+          if (outcome.hasAi) st.aiFallbackMatches++;
+        }
+        st.totalWaitMs += outcome.waitMs;
+        st.waitSamples++;
+      }
+      return stats;
+    }
+
     function computeRadarFromSnapshot(snap) {
       const rows = filterRowsByState(snap.product_events);
+      const queueAttempts = aggregateQueueAttempts(rows);
       const totalActiveUsersSet = new Set();
       const totalSessionsSet = new Set();
       const panelMetrics = new Map();
@@ -1868,9 +1972,9 @@
         panelMetrics.set(k, { opens: 0, users: new Set(), totalDwellMs: 0, dwellCount: 0, interactedCount: 0 });
       }
       const modeStats = {
-        casual: { queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0, aiFallbackMatches: 0, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
-        ranked: { queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0, aiFallbackMatches: 0, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
-        tourney: { queueJoins: 0, queueMatches: 0, queueCancels: 0, totalWaitMs: 0, aiFallbackMatches: 0, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
+        casual: { ...queueAttempts.casual, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
+        ranked: { ...queueAttempts.ranked, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
+        tourney: { ...queueAttempts.tourney, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
       };
       const characterCounts = new Map([['anya', 0], ['amara', 0], ['brutus', 0], ['lenny', 0]]);
       const characterShowroomMap = new Map([
@@ -1939,22 +2043,8 @@
           }
         } else if (r.name === 'queue.joined' || r.name === 'matchmaking.started') {
           funnelStages.queue_joined.add(actor);
-          const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
-          if (modeStats[mode]) modeStats[mode].queueJoins++;
         } else if (r.name === 'queue.matched' || r.name === 'matchmaking.seated') {
           funnelStages.table_seated.add(actor);
-          const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
-          const waitMs = Number(props.waitMs ?? props.wait_duration_ms ?? 0);
-          const hasAi = props.hasAiBots === true || props.hasAiBots === 'true';
-          if (modeStats[mode]) {
-            modeStats[mode].queueMatches++;
-            modeStats[mode].totalWaitMs += waitMs;
-            if (hasAi) modeStats[mode].aiFallbackMatches++;
-          }
-        } else if (r.name === 'queue.cancelled' || r.name === 'matchmaking.cancelled') {
-          const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
-          const waitMs = Number(props.waitMs ?? props.wait_duration_ms ?? 0);
-          if (modeStats[mode]) { modeStats[mode].queueCancels++; modeStats[mode].totalWaitMs += waitMs; }
         } else if (r.name === 'hand.completed') {
           funnelStages.hand_completed.add(actor);
           handsCompletedBySession.set(sk, (handsCompletedBySession.get(sk) ?? 0) + 1);
@@ -2019,6 +2109,7 @@
       }).sort((a, b) => b.dauSharePct - a.dauSharePct || b.opens - a.opens);
 
       const gameModes = Object.entries(modeStats).map(([mode, st]) => ({
+        ...queueAttempts[mode],
         mode,
         queueJoins: st.queueJoins,
         cancelRatePct: st.queueJoins > 0 ? Number(((st.queueCancels / st.queueJoins) * 100).toFixed(1)) : 0,
@@ -2745,6 +2836,16 @@
       `;
     }
 
+    function queueQualityNote(mode) {
+      const notes = [];
+      if (mode.duplicateQueueEvents) notes.push(`${mode.duplicateQueueEvents} repeated event${mode.duplicateQueueEvents === 1 ? '' : 's'} ignored`);
+      if (mode.unmatchedQueueOutcomes) notes.push(`${mode.unmatchedQueueOutcomes} outcome${mode.unmatchedQueueOutcomes === 1 ? '' : 's'} without a matching start excluded`);
+      if (mode.invalidQueueEvents) notes.push(`${mode.invalidQueueEvents} event${mode.invalidQueueEvents === 1 ? '' : 's'} without a usable session or timestamp excluded`);
+      if (mode.conflictingQueueOutcomes) notes.push(`${mode.conflictingQueueOutcomes} conflicting outcome${mode.conflictingQueueOutcomes === 1 ? '' : 's'} reconciled; seating takes precedence`);
+      if (mode.incompleteQueueAttempts) notes.push(`${mode.incompleteQueueAttempts} attempt${mode.incompleteQueueAttempts === 1 ? '' : 's'} with no recorded outcome`);
+      return notes.join(' · ');
+    }
+
     function renderRadar(root, data) {
       const features = data.featureLeaderboard || [];
       const showroom = data.characterShowroom || [];
@@ -2941,14 +3042,14 @@
             <div class="panel-header">
               <div>
                 <div class="panel-title">Game Modes & Matchmaking Health</div>
-                <div class="panel-subtitle">Queue wait times, cancellation rate, AI fallback share, and hands per sitting</div>
+                <div class="panel-subtitle">Cancellation rate and wait time count each queue attempt once. Attempts are reconstructed from session events; seating takes precedence when a cancellation races with a match.</div>
               </div>
             </div>
             <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
               <thead>
                 <tr>
                   <th>Mode</th>
-                  <th>Queue Joins</th>
+                  <th>Queue Attempts</th>
                   <th>Avg Wait</th>
                   <th>Cancel %</th>
                   <th>AI Fallback</th>
@@ -2961,13 +3062,19 @@
                     <td><strong style="text-transform:uppercase">${escapeHtml(m.mode)}</strong></td>
                     <td>${m.queueJoins}</td>
                     <td>${m.avgWaitSec}s</td>
-                    <td style="color:${m.cancelRatePct > 15 ? 'var(--amber)' : 'var(--text-secondary)'}">${m.cancelRatePct}%</td>
+                    <td style="color:${m.cancelRatePct > 15 ? 'var(--amber)' : 'var(--text-secondary)'}">
+                      ${m.queueJoins > 0 ? `${m.cancelRatePct}%` : '—'}
+                      <div style="font-size:11px;color:var(--muted);margin-top:3px;">${m.queueCancels || 0} of ${m.queueJoins} attempts</div>
+                    </td>
                     <td>${m.aiFallbackPct}%</td>
                     <td><strong>${m.avgHandsPerSession}</strong></td>
                   </tr>
                 `).join('')}
               </tbody>
             </table></div>
+            ${(data.gameModes || []).filter(m => queueQualityNote(m)).map(m => `
+              <div class="panel-subtitle" style="margin-top:10px;"><strong>${escapeHtml(m.mode.toUpperCase())}:</strong> ${escapeHtml(queueQualityNote(m))}.</div>
+            `).join('')}
           </div>
         </div>
 
