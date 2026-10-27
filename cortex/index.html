@@ -1341,7 +1341,28 @@
       user_classes['player-14'] = 'test';
       const team_users = { 'player-3': true, 'player-8': true };
 
-      return { sessions, issues, error_events, product_events, performance_spans, bug_reports, user_classes, team_users };
+      // New players as the backend's new_players rows: two weeks of sign-ups, a team account and a
+      // tester among today's (hidden unless test traffic is shown).
+      const new_players = [];
+      const dayMs = 24 * 3600 * 1000;
+      for (let day = 0; day < 14; day++) {
+        const counts = { ios: 3 + ((day * 7) % 5), android: 2 + ((day * 3) % 4), unknown: day % 4 === 0 ? 1 : 0 };
+        for (const [platform, n] of Object.entries(counts)) {
+          for (let k = 0; k < n; k++) {
+            new_players.push({
+              user_id: `new-${day}-${platform}-${k}`,
+              created_at: new Date(Date.now() - day * dayMs - (k + 1) * 37 * 60 * 1000).toISOString(),
+              platform,
+              linked: k === 0 && platform !== 'unknown',
+              traffic_class: platform === 'unknown' ? 'unreported' : 'player',
+            });
+          }
+        }
+      }
+      new_players.push({ user_id: 'new-team', created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(), platform: 'ios', linked: true, traffic_class: 'internal' });
+      new_players.push({ user_id: 'new-tester', created_at: new Date(Date.now() - 25 * 60 * 1000).toISOString(), platform: 'android', linked: false, traffic_class: 'test' });
+
+      return { sessions, issues, error_events, product_events, performance_spans, bug_reports, user_classes, team_users, new_players };
     }
 
     function getOrBuildDemoSnapshot() {
@@ -1383,6 +1404,7 @@
         issues,
         product_events: keep(snap.product_events),
         bug_reports: keep(snap.bug_reports, true),
+        new_players: (snap.new_players || []).filter(r => state.includeTest || !HIDDEN_TRAFFIC_CLASSES.includes(r.traffic_class)),
         test_traffic: { included: state.includeTest, hidden_sessions: snap.sessions.length - sessions.length },
       };
     }
@@ -1941,6 +1963,7 @@
       }));
 
       return {
+        newPlayers: Array.isArray(snap.new_players) ? snap.new_players : null,
         totalTrackedUsers: totalActiveUsersSet.size,
         totalTrackedSessions: totalSessionsSet.size,
         totalProductEvents: rows.length,
@@ -2501,6 +2524,112 @@
       `;
     }
 
+    // New players per day (owner, 2026-10-26: "how many new android users vs ios users for the day").
+    // The rows are the backend's new_players (1.79.3; the local server's synced copy): one per account
+    // made, never a bot, team and test accounts only while test traffic is shown. Days are counted in
+    // the viewer's time zone, newest first; null when the backend sends none.
+    function newPlayersByDay(rows, days = 14) {
+      if (!Array.isArray(rows)) return null;
+      const dayKey = (d) => d.toLocaleDateString('en-CA');
+      const now = new Date();
+      const buckets = [];
+      for (let i = 0; i < days; i++) {
+        const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+        buckets.push({ key: dayKey(date), date, offset: i, ios: 0, android: 0, unknown: 0, total: 0, linked: 0 });
+      }
+      const byKey = new Map(buckets.map(b => [b.key, b]));
+      for (const r of rows) {
+        if (state.platform !== 'all' && r.platform !== state.platform) continue;
+        const created = new Date(r.created_at);
+        if (Number.isNaN(created.getTime())) continue;
+        const bucket = byKey.get(dayKey(created));
+        if (!bucket) continue;
+        const platform = r.platform === 'ios' || r.platform === 'android' ? r.platform : 'unknown';
+        bucket[platform]++;
+        bucket.total++;
+        if (r.linked) bucket.linked++;
+      }
+      return buckets;
+    }
+
+    function newPlayersDayLabel(bucket) {
+      if (bucket.offset === 0) return 'Today';
+      if (bucket.offset === 1) return 'Yesterday';
+      return bucket.date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    function renderNewPlayersCard(rows) {
+      const buckets = newPlayersByDay(rows);
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
+      if (!buckets) {
+        return `
+          <div class="panel-card">
+            <div class="panel-title">New Players · iOS vs Android</div>
+            <div class="panel-subtitle">This environment's backend does not send new players yet (backend 1.79.3 or later).</div>
+          </div>
+        `;
+      }
+      const today = buckets[0];
+      const week = buckets.slice(0, 7).reduce((a, b) => ({ ios: a.ios + b.ios, android: a.android + b.android, total: a.total + b.total }), { ios: 0, android: 0, total: 0 });
+      const share = (n, total) => total > 0 ? `${Math.round((n / total) * 100)}%` : '–';
+      return `
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">New Players · iOS vs Android</div>
+              <div class="panel-subtitle">Accounts created per day in your time zone (${escapeHtml(timeZone)}). Bots never count; team and test accounts only while test traffic is shown. Platform: the app's install report, else its first Cortex session.</div>
+            </div>
+          </div>
+          <div class="kpi-grid">
+            <div class="kpi-card" style="padding:14px;">
+              <div class="kpi-label">Today · iOS</div>
+              <div class="kpi-value" style="font-size:22px;color:var(--accent);">${today.ios}</div>
+              <div class="kpi-sub">${share(today.ios, today.total)} of today's new players</div>
+            </div>
+            <div class="kpi-card" style="padding:14px;">
+              <div class="kpi-label">Today · Android</div>
+              <div class="kpi-value" style="font-size:22px;color:var(--green);">${today.android}</div>
+              <div class="kpi-sub">${share(today.android, today.total)} of today's new players</div>
+            </div>
+            <div class="kpi-card" style="padding:14px;">
+              <div class="kpi-label">Today · All</div>
+              <div class="kpi-value" style="font-size:22px;">${today.total}</div>
+              <div class="kpi-sub">${today.unknown} unknown platform · ${today.linked} linked Apple/Google</div>
+            </div>
+            <div class="kpi-card" style="padding:14px;">
+              <div class="kpi-label">Last 7 Days</div>
+              <div class="kpi-value" style="font-size:22px;">${week.total}</div>
+              <div class="kpi-sub">iOS ${week.ios} · Android ${week.android}</div>
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>iOS</th>
+                <th>Android</th>
+                <th>Unknown</th>
+                <th>Total</th>
+                <th>Linked</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${buckets.map(b => `
+                <tr>
+                  <td><strong>${escapeHtml(newPlayersDayLabel(b))}</strong></td>
+                  <td>${b.ios}</td>
+                  <td>${b.android}</td>
+                  <td style="color:var(--muted);">${b.unknown}</td>
+                  <td><strong>${b.total}</strong></td>
+                  <td style="color:var(--muted);">${b.linked}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
     function renderRadar(root, data) {
       const features = data.featureLeaderboard || [];
       const showroom = data.characterShowroom || [];
@@ -2508,6 +2637,8 @@
       const insights = data.tableInsights || {};
 
       root.innerHTML = `
+        ${renderNewPlayersCard(data.newPlayers)}
+
         <!-- Visual App Heatmap of Minamo Poker Hub -->
         <div class="panel-card">
           <div class="panel-header">
