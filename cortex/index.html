@@ -539,6 +539,33 @@
       overflow-y: auto;
     }
 
+    /* Table timeline (MinamoPokerBE MIN-205): the apps on the left, the server on the right */
+    .tl-grid { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+    .tl-row { display: grid; grid-template-columns: minmax(0, 1fr) 86px minmax(0, 1fr); gap: 8px; align-items: start; }
+    .tl-cell { min-width: 0; }
+    .tl-card { background: #080c14; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 6px 9px; font-size: 12px; }
+    .tl-card summary { cursor: pointer; list-style: none; }
+    .tl-card summary::-webkit-details-marker { display: none; }
+    .tl-card .tl-sub { font-size: 11px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+    .tl-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; color: #cbd5e1; margin: 6px 0 0; }
+    .tl-card.server { border-left: 3px solid var(--indigo); }
+    .tl-card.app { border-left: 3px solid var(--accent); }
+    .tl-card.stall, .tl-card.refused, .tl-card.error { border-color: rgba(244, 63, 94, 0.6); background: rgba(244, 63, 94, 0.08); }
+    .tl-card.away { border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.06); }
+    .tl-time { font-family: "SF Mono", Menlo, monospace; font-size: 11px; color: var(--muted); text-align: center; padding-top: 7px; }
+    .tl-ms { display: block; }
+    .tl-gap { text-align: center; font-size: 11px; color: var(--amber); border-top: 1px dashed rgba(245, 158, 11, 0.4); padding-top: 3px; margin: 4px 0; }
+    .tl-late { color: var(--amber); font-weight: 600; }
+    @media (max-width: 600px) {
+      /* A phone: the time, then the card across the rest; a server card indented, so apps read left and the server right. */
+      .tl-row { grid-template-columns: 52px minmax(0, 1fr); gap: 6px; }
+      .tl-row .tl-time { grid-column: 1; grid-row: 1; text-align: left; font-size: 10px; }
+      .tl-row .tl-cell { grid-column: 2; grid-row: 1; }
+      .tl-row .tl-cell.empty, .tl-head { display: none; }
+      .tl-card { padding: 5px 7px; font-size: 11px; }
+      .tl-card.server { margin-left: 18px; }
+    }
+
     .code-block {
       background: #05070b;
       border: 1px solid var(--border);
@@ -898,6 +925,11 @@
         🔑 Edge Gate
       </button>
 
+      <!-- Table Timeline Button (MIN-208) -->
+      <button class="btn" id="tableTimelineBtn" onclick="openTableTimeline()" title="One table's story: the apps' events beside the server's records">
+        Table Timeline
+      </button>
+
       <!-- Live Tail Stream Button -->
       <button class="btn" id="liveStreamBtn" onclick="openLiveStreamDrawer()">
         <span class="env-dot local"></span> Live Stream
@@ -937,6 +969,11 @@
   <!-- Slide-Over Live Dev Stream ("Tail Mode") Drawer -->
   <div class="drawer-backdrop" id="liveStreamBackdrop">
     <div class="drawer" id="liveStreamContent"></div>
+  </div>
+
+  <!-- Slide-Over Table Timeline Drawer (MIN-208) -->
+  <div class="drawer-backdrop" id="tableTimelineBackdrop">
+    <div class="drawer" id="tableTimelineContent"></div>
   </div>
 
   <!-- Slide-Over Supabase Edge Gate & PWA Owner Key Drawer -->
@@ -998,6 +1035,9 @@
       edgeLastError: null,
       demoKeyVerified: false,
       demoSnapCache: null,
+      timelineTableId: '',
+      timelineFilter: 'all',
+      timelineData: null,
     };
 
     function buildDemoSnapshot() {
@@ -3205,6 +3245,7 @@
             <button class="btn primary" onclick="setIssueStatus(${iss.id}, '${iss.status === 'resolved' ? 'unresolved' : 'resolved'}', '${escapeHtml(iss.last_seen_version)}')">
               ${iss.status === 'resolved' ? 'Reopen Issue' : 'Resolve in Next Release'}
             </button>
+            ${tableIdOf(extra) ? `<button class="btn" onclick="closeIssueDrawer(); openTableTimeline('${tableIdOf(extra)}')">Table Timeline</button>` : ''}
             <button class="btn" onclick="closeIssueDrawer()">Close</button>
           </div>
         </div>
@@ -3479,12 +3520,281 @@
                   <div style="font-weight:700;font-family:monospace;font-size:12px;">${escapeHtml(item.title)}</div>
                   ${metaPairs ? `<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(metaPairs)}</div>` : ''}
                 </div>
+                ${tableIdOf(item.meta) ? `<button class="btn" style="padding:3px 8px;font-size:11px;" onclick="closeLiveStreamDrawer(); openTableTimeline('${tableIdOf(item.meta)}')">Table</button>` : ''}
                 <div style="font-family:monospace;font-size:11px;color:var(--muted);">v${escapeHtml(item.appVersion)} · ${escapeHtml(item.ts ? item.ts.slice(11, 19) : '')}</div>
               </div>
             `;
           }).join('') || '<div style="color:var(--muted)">No live stream items matching filter.</div>'}
         </div>
       `;
+    }
+
+    // Table timeline (MinamoPokerBE MIN-205, MIN-208; design docs/design/2026-10-27-cortex-game-diagnostics.md
+    // 2.8): one table on one time axis, the apps' events and stalls on the left, the server's own
+    // record (game trail, hands, scheduler, alerts, results) on the right, gaps over 5 s marked. The
+    // hosted portal reads cortex-admin's table_timeline; the local server proxies the same RPC with a
+    // service key, or shows the apps' events it holds.
+    const TABLE_TIMELINE_GAP_MS = 5000;
+    const TABLE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    function openTableTimeline(tableId) {
+      state.timelineTableId = tableId || state.timelineTableId || '';
+      state.timelineFilter = state.timelineFilter || 'all';
+      document.getElementById('tableTimelineBackdrop').classList.add('open');
+      if (state.timelineTableId) {
+        refreshTableTimeline();
+      } else {
+        renderTableTimeline(null, null);
+      }
+    }
+
+    function closeTableTimeline() {
+      document.getElementById('tableTimelineBackdrop').classList.remove('open');
+    }
+
+    function submitTableTimelineId() {
+      const input = document.getElementById('tableTimelineInput');
+      const value = (input?.value || '').trim();
+      if (!TABLE_ID_PATTERN.test(value)) {
+        renderTableTimeline(null, 'That is not a table id (a UUID).');
+        return;
+      }
+      openTableTimeline(value.toLowerCase());
+    }
+
+    function setTableTimelineFilter(filter) {
+      state.timelineFilter = filter;
+      renderTableTimeline(state.timelineData, null);
+    }
+
+    async function loadTableTimeline(tableId) {
+      if (state.environment === 'demo') {
+        return { error: 'The demo has no tables: switch to staging or production.' };
+      }
+      if (state.dataSource === 'edge') {
+        if (!state.ownerKey) return { error: 'Connect the Edge Gate first (Cortex Owner Key).' };
+        const res = await fetch(`${getEdgeUrl(state.environment)}?action=table_timeline&tableId=${encodeURIComponent(tableId)}`, {
+          headers: {
+            Authorization: `Bearer ${state.ownerKey}`,
+            'x-cortex-owner-key': state.ownerKey,
+            Accept: 'application/json',
+          },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const old = res.status === 400 && /Unsupported/.test(body.error || '');
+          return { error: old ? `The ${state.environment} backend has no table timeline yet (needs 1.82.0).` : (body.error || `Edge Gate returned HTTP ${res.status}`) };
+        }
+        return { timeline: body.timeline || {}, source: 'server' };
+      }
+      if (state.environment === 'all') {
+        return { error: 'Pick one environment: a table lives in one project.' };
+      }
+      const res = await fetch(`/api/table-timeline?environment=${encodeURIComponent(state.environment)}&tableId=${encodeURIComponent(tableId)}`);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: body.error || `HTTP ${res.status}` };
+      return { timeline: body.timeline || {}, source: body.source === 'local' ? 'local' : 'server' };
+    }
+
+    async function refreshTableTimeline() {
+      const tableId = state.timelineTableId;
+      renderTableTimeline(null, null, true);
+      let result;
+      try {
+        result = await loadTableTimeline(tableId);
+      } catch (err) {
+        result = { error: 'Could not load the timeline.' };
+      }
+      if (tableId !== state.timelineTableId) return;
+      state.timelineData = result.timeline ? { ...result.timeline, loadedFrom: result.source } : null;
+      renderTableTimeline(state.timelineData, result.error || null);
+    }
+
+    function tlClock(ts) {
+      const d = new Date(typeof ts === 'number' ? ts : String(ts || ''));
+      if (Number.isNaN(d.getTime())) return '';
+      const pad = (n, w = 2) => String(n).padStart(w, '0');
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+    }
+
+    function tlPlayerName(userId, players) {
+      if (!userId) return '';
+      const p = (players || []).find(x => x.userId === userId);
+      if (p && p.username) return `${p.username}${p.isBot ? ' (bot)' : ''}`;
+      return String(userId).slice(0, 8);
+    }
+
+    function tlDuration(ms) {
+      const n = Number(ms);
+      if (!Number.isFinite(n)) return '';
+      if (Math.abs(n) < 1000) return `${Math.round(n)} ms`;
+      if (Math.abs(n) < 120000) return `${(n / 1000).toFixed(1)} s`;
+      return `${Math.round(n / 60000)} min`;
+    }
+
+    function tlSummary(row, players) {
+      const d = row.detail || {};
+      const who = tlPlayerName(row.userId, players);
+      const toAct = d.turn ? ` · ${tlPlayerName(d.turn, players)} to act` : '';
+      const deadline = d.turnDeadline ? ` (deadline ${tlClock(d.turnDeadline)})` : '';
+      if (row.source === 'server') {
+        switch (row.kind) {
+          case 'dealt': return { title: `hand ${d.hand ?? '?'} dealt${toAct}`, tone: '' };
+          case 'action': return { title: `${who} ${d.action || 'acted'}${d.amount ? ' ' + d.amount : ''}${toAct}${deadline}`, tone: '' };
+          case 'decided': return { title: `hand ${d.hand ?? '?'} decided${who ? ` (${who} ${d.action || ''})` : ''}`, tone: '' };
+          case 'settled': return { title: `hand ${d.hand ?? '?'} settled${d.nextHandAt ? ` · next hand ${tlClock(d.nextHandAt)}` : ''}`, tone: '' };
+          case 'started': return { title: `match started${toAct}${deadline}`, tone: '' };
+          case 'players_changed': return { title: `${d.players ?? '?'} players at the table${toAct}`, tone: '' };
+          case 'match_complete': return { title: 'match complete', tone: '' };
+          case 'state': return { title: `state written${toAct}${deadline}`, tone: '' };
+          case 'action_refused': return { title: `refused ${who}'s ${d.action || 'action'}: ${d.reason || ''}`, tone: 'refused' };
+          case 'timeout_report': return { title: `timeout report from ${who}: ${d.outcome || ''}`, tone: d.outcome === 'applied' ? '' : 'away' };
+          case 'broadcast_failed': return { title: `broadcast not delivered: ${d.topic || ''} ${d.event || ''}`, tone: 'refused' };
+          case 'hand_recorded': return { title: `hand ${d.hand ?? '?'} recorded · ${d.winType || ''} · pot ${d.pot ?? ''}`, tone: '' };
+          case 'ops_alert': return { title: `${d.level || ''} alert: ${d.message || ''}`, tone: 'refused' };
+          case 'ranked_result': return { title: `${who} placed ${d.placement ?? '?'}${d.mmrChange != null ? ` · mmr ${d.mmrChange > 0 ? '+' : ''}${d.mmrChange}` : ''}`, tone: '' };
+          case 'tourney_entry': return { title: `${who} tourney entry${d.placement ? ` · place ${d.placement}` : ''}`, tone: '' };
+          default:
+            if (String(row.kind).startsWith('scheduler_pending.')) return { title: `pending ${row.kind.slice(18)} (attempts ${d.attempts ?? 0})`, tone: '' };
+            if (String(row.kind).startsWith('scheduler.')) return { title: `scheduler ${row.kind.slice(10)}: ${d.outcome || ''}${d.detail ? ` (${d.detail})` : ''}`, tone: d.outcome && !/^done|^ok/.test(d.outcome) ? 'away' : '' };
+            return { title: row.kind, tone: '' };
+        }
+      }
+      if (row.kind === 'game.stall') {
+        const x = d.extra || {};
+        const unrouted = x.stateTopicRouted === 'false' || x.cardsTopicRouted === 'false';
+        return { title: `STALL ${x.trigger || ''}${unrouted ? ' · game topic not routed' : ''}`, tone: 'stall' };
+      }
+      if (row.kind === 'error') return { title: `${d.level || 'error'}: ${d.message || ''}`, tone: 'error' };
+      if (row.kind === 'session.start') return { title: `session start · v${d.appVersion || '?'} (${d.buildNumber || '?'}) ${d.deviceModel || ''}`, tone: '' };
+      if (String(row.kind).startsWith('span:')) return { title: `${row.kind.slice(5)} · ${tlDuration(d.durationMs)}`, tone: '' };
+      const props = d.properties || {};
+      const context = new Set(['tableId', 'table_id', 'mode', 'seat', 'round', 'turn', 'handNumber', 'actionSequence']);
+      const pairs = Object.entries(props)
+        .filter(([k]) => !context.has(k))
+        .slice(0, 4)
+        .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+        .join(' ');
+      const away = row.kind === 'app.backgrounded' || row.kind === 'app.hang' || row.kind === 'turn.input_missed' || row.kind === 'game.load_slow';
+      const failed = (row.kind === 'game.resync' && props.outcome && props.outcome !== 'ok') || row.kind === 'turn.timeout';
+      return { title: `${row.kind}${pairs ? ' · ' + pairs : ''}`, tone: failed ? 'error' : (away ? 'away' : '') };
+    }
+
+    function tlSubline(row, players) {
+      const d = row.detail || {};
+      const parts = [];
+      if (row.source === 'app') {
+        const props = d.properties || d.extra || {};
+        if (row.userId) parts.push(tlPlayerName(row.userId, players));
+        if (row.platform) parts.push(row.platform);
+        if (props.handNumber) parts.push(`hand ${props.handNumber}${props.actionSequence ? ' · seq ' + props.actionSequence : ''}`);
+        if (props.turn) parts.push(`turn ${props.turn}`);
+        const late = d.receivedAt ? Date.parse(d.receivedAt) - Date.parse(row.ts) : 0;
+        if (late > 60000) parts.push(`<span class="tl-late">arrived ${tlDuration(late)} late</span>`);
+      } else {
+        if (d.hand != null && !['dealt', 'decided', 'settled', 'hand_recorded'].includes(row.kind)) parts.push(`hand ${d.hand}`);
+        if (d.sequence != null) parts.push(`seq ${d.sequence}`);
+        if (d.round) parts.push(d.round);
+        if (d.missed && typeof d.missed === 'object') {
+          const missed = Object.entries(d.missed).map(([u, n]) => `${tlPlayerName(u, players)} missed ${n}`).join(', ');
+          if (missed) parts.push(missed);
+        }
+      }
+      return parts.map(p => (p.startsWith('<span') ? p : escapeHtml(p))).join(' · ');
+    }
+
+    function tlDetail(row) {
+      const d = row.detail || {};
+      if (row.kind === 'game.stall') {
+        const crumbs = Array.isArray(d.breadcrumbs) ? d.breadcrumbs : [];
+        const lines = crumbs.map(b => `${String(b.ts || '').slice(11, 23)} [${b.category || ''}] ${b.message || ''}`).join('\n');
+        return `${JSON.stringify(d.extra || {}, null, 2)}\n\nlast ${crumbs.length} breadcrumbs:\n${lines}`;
+      }
+      return JSON.stringify(d, null, 2);
+    }
+
+    function renderTableTimeline(timeline, error, loading = false) {
+      const container = document.getElementById('tableTimelineContent');
+      const tableId = state.timelineTableId || '';
+      const players = timeline?.players || [];
+      const filter = state.timelineFilter || 'all';
+      const allRows = (timeline?.rows || []).filter(r => r && r.ts);
+      const rows = allRows.filter(r => filter === 'all' || r.source === filter);
+      const table = timeline?.table || null;
+
+      let body = '';
+      if (loading) {
+        body = '<div style="color:var(--muted);margin-top:16px;">Loading the table…</div>';
+      } else if (error) {
+        body = `<div style="color:var(--red);margin-top:16px;">${escapeHtml(error)}</div>`;
+      } else if (timeline && timeline.found === false) {
+        body = '<div style="color:var(--muted);margin-top:16px;">Nothing names this table in this environment (the server keeps its trail 14 days).</div>';
+      } else if (timeline) {
+        let prev = null;
+        const out = [];
+        for (const row of rows) {
+          const t = Date.parse(row.ts);
+          if (prev != null && Number.isFinite(t) && t - prev > TABLE_TIMELINE_GAP_MS) {
+            out.push(`<div class="tl-gap">${escapeHtml(tlDuration(t - prev))} with nothing</div>`);
+          }
+          if (Number.isFinite(t)) prev = t;
+          const { title, tone } = tlSummary(row, players);
+          const card = `
+            <details class="tl-card ${row.source === 'server' ? 'server' : 'app'} ${escapeHtml(tone)}">
+              <summary>
+                <div style="font-weight:600;overflow-wrap:anywhere;">${escapeHtml(title)}</div>
+                <div class="tl-sub">${tlSubline(row, players)}</div>
+              </summary>
+              <pre>${escapeHtml(tlDetail(row))}</pre>
+            </details>`;
+          out.push(`
+            <div class="tl-row">
+              <div class="tl-cell${row.source === 'server' ? ' empty' : ''}">${row.source === 'server' ? '' : card}</div>
+              <div class="tl-time">${escapeHtml(tlClock(row.ts).slice(0, 8))}<span class="tl-ms">${escapeHtml(tlClock(row.ts).slice(8))}</span></div>
+              <div class="tl-cell${row.source === 'server' ? '' : ' empty'}">${row.source === 'server' ? card : ''}</div>
+            </div>`);
+        }
+        const localNote = timeline.loadedFrom === 'local'
+          ? '<div style="font-size:11px;color:var(--amber);margin-top:6px;">The apps’ events this server holds only: set the environment’s service key in MinamoCortex/.env to see the server’s side.</div>'
+          : '';
+        const playerChips = players.map(p => `<span class="pill" style="background:rgba(255,255,255,0.06);">${escapeHtml(tlPlayerName(p.userId, players))}${p.isInternal ? ' · team' : ''}</span>`).join(' ');
+        body = `
+          ${table ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">${escapeHtml(table.gameType || timeline.gameType || '')} · ${escapeHtml(table.status || '')}${table.seats ? ` · ${escapeHtml(String(table.seats))} seats` : ''}${table.createdAt ? ` · created ${escapeHtml(new Date(table.createdAt).toLocaleString())}` : ''}${table.completedAt ? ` · ended ${escapeHtml(new Date(table.completedAt).toLocaleString())}` : ''}</div>` : (timeline.gameType ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">${escapeHtml(timeline.gameType)} · table row gone</div>` : '')}
+          ${playerChips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">${playerChips}</div>` : ''}
+          ${localNote}
+          <div class="segmented" style="margin-top:12px;">
+            <button class="${filter === 'all' ? 'active' : ''}" onclick="setTableTimelineFilter('all')">All (${allRows.length})</button>
+            <button class="${filter === 'app' ? 'active' : ''}" onclick="setTableTimelineFilter('app')">Apps</button>
+            <button class="${filter === 'server' ? 'active' : ''}" onclick="setTableTimelineFilter('server')">Server</button>
+          </div>
+          <div class="tl-row tl-head" style="margin-top:10px;font-size:11px;color:var(--muted);">
+            <div>the apps</div><div style="text-align:center;">your time</div><div>the server</div>
+          </div>
+          <div class="tl-grid">${out.join('') || '<div style="color:var(--muted)">No rows.</div>'}</div>`;
+      }
+
+      container.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+          <div>
+            <h2 style="font-size:18px;">Table Timeline (${escapeHtml(state.environment.toUpperCase())})</h2>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px;">One table on one time axis: the apps’ events beside the server’s record. Tap a row for its details.</div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            ${tableId ? '<button class="btn" onclick="refreshTableTimeline()">Reload</button>' : ''}
+            <button class="btn" onclick="closeTableTimeline()">Close</button>
+          </div>
+        </div>
+        <form style="display:flex;gap:8px;margin-top:12px;" onsubmit="event.preventDefault(); submitTableTimelineId();">
+          <input id="tableTimelineInput" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="table id" value="${escapeHtml(tableId)}"
+            style="flex:1;min-width:0;background:#05070b;border:1px solid var(--border);border-radius:8px;color:var(--text);padding:8px 10px;font-family:monospace;font-size:12px;">
+          <button class="btn primary" type="submit">Open</button>
+        </form>
+        ${body}`;
+    }
+
+    function tableIdOf(meta) {
+      const id = meta && (meta.tableId || meta.table_id);
+      return typeof id === 'string' && TABLE_ID_PATTERN.test(id) ? id.toLowerCase() : null;
     }
 
     async function setIssueStatus(issueId, status, version) {
