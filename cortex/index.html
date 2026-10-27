@@ -3059,7 +3059,7 @@
               <tbody>
                 ${(data.gameModes || []).map(m => `
                   <tr>
-                    <td><strong style="text-transform:uppercase">${escapeHtml(m.mode)}</strong></td>
+                    <td><strong style="text-transform:uppercase;white-space:nowrap">${escapeHtml(m.mode)}</strong></td>
                     <td>${m.queueJoins}</td>
                     <td>${m.avgWaitSec}s</td>
                     <td style="color:${m.cancelRatePct > 15 ? 'var(--amber)' : 'var(--text-secondary)'}">
