@@ -363,6 +363,7 @@
     .panel-card .kpi-grid { gap: 12px; margin-bottom: 18px; }
     .panel-card .kpi-card { background: var(--surface); padding: 14px; }
     .panel-card .kpi-card .kpi-value { font-size: 22px; }
+    .totals-note { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 0 0 14px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; }
     .issue-list { display: flex; flex-direction: column; }
     .issue-row {
       display: flex;
@@ -1200,6 +1201,7 @@
       dataSource: localStorage.getItem('cortex_data_source') || 'auto', // 'local_server' | 'edge'
       ownerKey: localStorage.getItem('cortex_owner_key') || '',
       edgeSnapCache: null,
+      edgeActivityCache: null,
       edgeSnapEnv: null,
       edgeLastError: null,
       demoKeyVerified: false,
@@ -1711,6 +1713,7 @@
       state.includeTest = includeTest;
       localStorage.setItem(`cortex_include_test_${state.environment}`, String(includeTest));
       state.edgeSnapCache = null;
+      state.edgeActivityCache = null;
       syncEnvButtonsUI();
       await loadVersions();
       await refreshActiveTab();
@@ -1723,6 +1726,7 @@
       state.appVersion = 'all';
       state.compareVersion = 'all';
       state.edgeSnapCache = null;
+      state.edgeActivityCache = null;
       state.edgeLastError = null;
       syncEnvButtonsUI();
       updateHeader();
@@ -1893,11 +1897,10 @@
       return t && typeof t === 'object' ? { included: Boolean(t.included), hiddenSessions: Number(t.hidden_sessions || 0) } : null;
     }
 
-    function computePulseFromSnapshot(snap) {
-      const sessions = filterRowsByState(snap.sessions);
-      const allEnvSessions = filterRowsByState(snap.sessions, false);
+    // Pulse from the activity totals (server/activity.js's shape, or get_cortex_activity's) and the
+    // snapshot's issues and bug reports, which stay rows (Triage and Inbox list them one by one).
+    function pulseFromActivity(act, snap) {
       const rawIssues = filterRowsByState(snap.issues, false);
-      const allEnvSpans = filterRowsByState(snap.performance_spans, false);
       const allEnvErrors = filterRowsByState(snap.error_events, false);
 
       const issueUsersMap = new Map();
@@ -1912,54 +1915,44 @@
         affected_users_count: Number(iss.affected_users_count) || issueUsersMap.get(Number(iss.id))?.size || 1,
       }));
 
-      const totalSessions = sessions.length;
-      const crashedSessions = sessions.filter(s => s.status === 'crashed').length;
-      const erroredSessions = sessions.filter(s => Number(s.errors_count || 0) > 0).length;
-      const allUsersSet = new Set(sessions.map(s => s.user_id || s.install_id || s.session_id));
-      const crashedUsersSet = new Set(sessions.filter(s => s.status === 'crashed').map(s => s.user_id || s.install_id || s.session_id));
-      const activeUsers = allUsersSet.size;
-      const avgSessionSec = totalSessions > 0
-        ? Math.round(sessions.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / totalSessions / 1000)
-        : 0;
+      const ss = act.sessions;
+      const totalSessions = Number(ss.total) || 0;
+      const crashedSessions = Number(ss.crashed) || 0;
+      const activeUsers = Number(ss.players) || 0;
+      const avgSessionSec = totalSessions > 0 ? Math.round(Number(ss.durationMsSum) / totalSessions / 1000) : 0;
       const crashFreeSessionsPct = totalSessions > 0 ? Number((((totalSessions - crashedSessions) / totalSessions) * 100).toFixed(2)) : 100;
-      const crashFreeUsersPct = activeUsers > 0 ? Number((((activeUsers - crashedUsersSet.size) / activeUsers) * 100).toFixed(2)) : 100;
+      const crashFreeUsersPct = activeUsers > 0 ? Number((((activeUsers - Number(ss.crashedPlayers || 0)) / activeUsers) * 100).toFixed(2)) : 100;
 
-      const totalAllEnvSessions = Math.max(1, allEnvSessions.length);
-      const byVer = new Map();
-      for (const s of allEnvSessions) {
-        const key = `${s.platform}:${s.app_version}`;
-        if (!byVer.has(key)) byVer.set(key, { platform: s.platform, appVersion: s.app_version, total: 0, crashed: 0, totalErrors: 0, users: new Set() });
-        const g = byVer.get(key);
-        g.total++;
-        if (s.status === 'crashed') g.crashed++;
-        g.totalErrors += Number(s.errors_count || 0);
-        g.users.add(s.user_id || s.install_id || s.session_id);
-      }
-      const versionBreakdown = Array.from(byVer.values()).map(g => ({
-        platform: g.platform,
-        appVersion: g.appVersion,
-        adoptionPct: Number(((g.total / totalAllEnvSessions) * 100).toFixed(1)),
-        sessions: g.total,
-        users: g.users.size,
-        crashFreePct: g.total > 0 ? Number((((g.total - g.crashed) / g.total) * 100).toFixed(2)) : 100,
-        totalErrors: g.totalErrors,
-      })).sort((a, b) => b.appVersion.localeCompare(a.appVersion) || b.sessions - a.sessions);
+      const versions = ss.byVersion || [];
+      const totalAllVersions = Math.max(1, versions.reduce((a, v) => a + Number(v.sessions || 0), 0));
+      const versionBreakdown = versions.map(v => ({
+        platform: v.platform,
+        appVersion: v.appVersion,
+        adoptionPct: Number(((Number(v.sessions) / totalAllVersions) * 100).toFixed(1)),
+        sessions: Number(v.sessions),
+        users: Number(v.players),
+        crashFreePct: Number(v.sessions) > 0 ? Number((((v.sessions - v.crashed) / v.sessions) * 100).toFixed(2)) : 100,
+        totalErrors: Number(v.errors),
+      }));
 
       // Version-over-Version Comparison (e.g. 2.0.2 vs 2.0.1)
-      const uniqueVersions = Array.from(new Set(allEnvSessions.map(s => String(s.app_version || '')).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+      const uniqueVersions = Array.from(new Set(versions.map(v => String(v.appVersion || '')).filter(Boolean))).sort((a, b) => b.localeCompare(a));
       let versionComparison = null;
       const curVer = state.appVersion !== 'all' ? state.appVersion : uniqueVersions[0];
       const prevVer = state.compareVersion !== 'all' ? state.compareVersion : uniqueVersions.find(v => v !== curVer);
       if (curVer && prevVer && curVer !== prevVer) {
         const calcVerStats = (ver) => {
-          const vs = allEnvSessions.filter(s => s.app_version === ver);
-          const vTotal = vs.length;
-          const vCrashed = vs.filter(s => s.status === 'crashed').length;
-          const vCf = vTotal > 0 ? Number((((vTotal - vCrashed) / vTotal) * 100).toFixed(2)) : 100;
-          const vAvgSec = vTotal > 0 ? Math.round(vs.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / vTotal / 1000) : 0;
-          const vSpans = allEnvSpans.filter(sp => sp.app_version === ver && ['app.cold_start', 'startup.critical_phase', 'startup.preload', 'preload.critical'].includes(sp.name));
-          const vStartupMs = vSpans.length > 0 ? Math.round(vSpans.reduce((a, b) => a + Number(b.duration_ms || 0), 0) / vSpans.length) : 0;
-          return { sessions: vTotal, crashFreePct: vCf, avgSessionSec: vAvgSec, avgStartupMs: vStartupMs };
+          const rows = versions.filter(v => v.appVersion === ver);
+          const vTotal = rows.reduce((a, v) => a + Number(v.sessions), 0);
+          const vCrashed = rows.reduce((a, v) => a + Number(v.crashed), 0);
+          const vDuration = rows.reduce((a, v) => a + Number(v.durationMsSum), 0);
+          const startup = (act.startupByVersion || []).find(s => s.appVersion === ver);
+          return {
+            sessions: vTotal,
+            crashFreePct: vTotal > 0 ? Number((((vTotal - vCrashed) / vTotal) * 100).toFixed(2)) : 100,
+            avgSessionSec: vTotal > 0 ? Math.round(vDuration / vTotal / 1000) : 0,
+            avgStartupMs: startup ? Number(startup.avgMs) : 0,
+          };
         };
         const curStats = calcVerStats(curVer);
         const prevStats = calcVerStats(prevVer);
@@ -2001,13 +1994,13 @@
       for (const iss of topIssues.filter(i => i.status !== 'resolved').slice(0, 2)) {
         actionItems.push({
           severity: iss.status === 'regressed' || iss.is_fatal ? 'critical' : 'warning',
-          label: `${iss.status === 'regressed' ? 'REGRESSED' : iss.is_fatal ? 'CRASH' : 'ERROR'} · ${iss.platform.toUpperCase()}`,
+          label: `${iss.status === 'regressed' ? 'REGRESSED' : iss.is_fatal ? 'CRASH' : 'ERROR'} · ${String(iss.platform || '').toUpperCase()}`,
           detail: `${iss.title} (${issueEventsCount(iss)} events)`,
           targetTab: 'triage',
           targetId: Number(iss.id),
         });
       }
-      const openReportsCount = (snap.bug_reports || []).filter(r => r.status === 'open' && (state.environment === 'all' || r.environment === state.environment)).length;
+      const openReportsCount = (snap.bug_reports || []).filter(r => r.status === 'open' && (state.environment === 'all' || !r.environment || r.environment === state.environment)).length;
       if (openReportsCount > 0) {
         actionItems.push({
           severity: 'healthy',
@@ -2022,7 +2015,7 @@
         summary: {
           totalSessions,
           crashedSessions,
-          erroredSessions,
+          erroredSessions: Number(ss.errored) || 0,
           activeUsers,
           avgSessionSec,
           crashFreeSessionsPct,
@@ -2034,7 +2027,9 @@
         versionComparison,
         versionBreakdown,
         topIssues,
-        testTraffic: testTrafficFromSnapshot(snap),
+        testTraffic: state.includeTest ? { included: true, hiddenSessions: 0 } : { included: false, hiddenSessions: Number(ss.hiddenSessions) || 0 },
+        activity: { buckets: act.buckets, ...ss.series },
+        source: act.source,
       };
     }
 
@@ -2431,168 +2426,357 @@
       </svg>`;
     }
 
-    function computeRadarFromSnapshot(snap) {
-      const rows = filterRowsByState(snap.product_events);
-      const queueAttempts = aggregateQueueAttempts(rows);
-      const totalActiveUsersSet = new Set();
-      const totalSessionsSet = new Set();
-      const panelMetrics = new Map();
-      for (const k of Object.keys(ALL_HOME_PANELS_META)) {
-        panelMetrics.set(k, { opens: 0, users: new Set(), totalDwellMs: 0, dwellCount: 0, interactedCount: 0 });
-      }
-      const modeStats = {
-        casual: { ...queueAttempts.casual, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
-        ranked: { ...queueAttempts.ranked, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
-        tourney: { ...queueAttempts.tourney, tablesCompleted: 0, totalHandsPlayed: 0, earlyLeaves: 0 },
-      };
-      const characterCounts = new Map([['anya', 0], ['amara', 0], ['brutus', 0], ['lenny', 0]]);
-      const characterShowroomMap = new Map([
-        ['anya', { previews: 0, purchases: 0, abandons: 0 }],
-        ['amara', { previews: 0, purchases: 0, abandons: 0 }],
-        ['brutus', { previews: 0, purchases: 0, abandons: 0 }],
-        ['lenny', { previews: 0, purchases: 0, abandons: 0 }],
-      ]);
-      const expressionSetCounts = new Map([
-        ['default', 0], ['set1', 0], ['set2', 0], ['spades', 0], ['hearts', 0], ['diamonds', 0], ['clubs', 0],
-      ]);
-      const tableLeaveReasons = { voluntary: 0, busted_chips: 0, timeout_kicked: 0, disconnected: 0 };
-      const funnelStages = {
-        cold_launch: new Set(), preload_complete: new Set(), auth_complete: new Set(),
-        home_reached: new Set(), lobby_opened: new Set(), queue_joined: new Set(),
-        table_seated: new Set(), hand_completed: new Set(), play_again: new Set(),
-      };
-      let turnTimeouts = 0, insufficientFundsCount = 0, purchaseAbandonedCount = 0, realtimeDisconnects = 0, realtimeStateFallbacks = 0;
-      const handsCompletedBySession = new Map();
-      const handsTableLeftBySession = new Map();
+    // Embedded from server/activity.js; activity.test.ts enforces parity.
+    const ACTIVITY_STARTUP_SPANS = ['app.cold_start', 'startup.critical_phase', 'startup.preload', 'preload.critical'];
+    const ACTIVITY_QUEUE_EVENTS = ['queue.joined', 'matchmaking.started', 'queue.cancelled', 'matchmaking.cancelled', 'queue.matched', 'matchmaking.seated'];
+    const ACTIVITY_ITEM_EVENTS = ['character.selected', 'customize.equipped', 'character.expression_changed', 'store.item_previewed', 'store.purchase_completed', 'store.iap_completed', 'store.purchase_abandoned'];
+    const ACTIVITY_QUEUE_LIMIT = 20000;
 
-      const hasExplicitPreload = rows.some(r => r.name === 'preload.completed');
-      const hasExplicitAuth = rows.some(r => r.name === 'auth.completed');
-      const extractExprToken = (raw) => {
-        const parts = String(raw || '').toLowerCase().split(/[_-\s]+/);
-        for (const p of parts) {
-          if (expressionSetCounts.has(p)) return p;
+    function activityProps(row) {
+      if (row.properties && typeof row.properties === 'object' && !Array.isArray(row.properties)) return row.properties;
+      try {
+        const parsed = JSON.parse(row.properties_json || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    // A number sent as a JSON number or a string (iOS sends strings); anything else is 0. The SQL takes
+    // the text form against ^\s*[0-9]+(\.[0-9]+)?\s*$.
+    function activityNumber(value) {
+      if (value == null) return 0;
+      const text = String(value);
+      return /^\s*[0-9]+(\.[0-9]+)?\s*$/.test(text) ? Number(text) : 0;
+    }
+
+    // Text comparison as Postgres orders these ids (code points).
+    function activityCompare(a, b) {
+      return a < b ? -1 : a > b ? 1 : 0;
+    }
+
+    function activityTime(value) {
+      const t = Date.parse(value);
+      return Number.isFinite(t) ? t : NaN;
+    }
+
+    // The sorted value at floor(p * n / 100), rounded (Vitals).
+    function activityPercentile(sorted, p) {
+      if (sorted.length === 0) return 0;
+      return Math.round(sorted[Math.min(sorted.length - 1, Math.floor((p * sorted.length) / 100))]);
+    }
+
+    /**
+     * The activity totals from rows already narrowed to one environment, the window and the test-traffic
+     * rule (the snapshot's, the demo's or the local store's). Platform and version narrow them here, as
+     * the SQL does. rows: { sessions, productEvents, spans, hiddenSessions }.
+     */
+    function buildCortexActivity(rows, options = {}) {
+      const hours = Math.min(8760, Math.max(1, Math.round(Number(options.windowHours) || 24)));
+      const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+      const cutoff = nowMs - hours * 3600000;
+      const platform = options.platform && options.platform !== 'all' ? options.platform : 'all';
+      const version = options.appVersion && options.appVersion !== 'all' ? options.appVersion : 'all';
+      const onPlatform = (r) => platform === 'all' || r.platform === platform;
+      const onVersion = (r) => version === 'all' || r.app_version === version;
+      const buckets = chartTimeBuckets(hours, nowMs);
+      const timeZone = options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+      // Sessions: the platform's rows for the version list; the version's for everything else.
+      const vis = (rows.sessions || []).filter((s) => activityTime(s.started_at) >= cutoff && onPlatform(s));
+      const cur = vis.filter(onVersion);
+      const actorOf = (s) => (s.user_id ? String(s.user_id) : '') || s.install_id || s.session_id;
+      const byVersionMap = new Map();
+      for (const s of vis) {
+        const key = `${s.platform}\u0000${s.app_version}`;
+        if (!byVersionMap.has(key)) {
+          byVersionMap.set(key, { platform: s.platform, appVersion: s.app_version, sessions: 0, crashed: 0, errors: 0, players: new Set(), durationMsSum: 0 });
         }
-        return null;
+        const v = byVersionMap.get(key);
+        v.sessions++;
+        if (s.status === 'crashed') v.crashed++;
+        v.errors += Number(s.errors_count) || 0;
+        v.players.add(actorOf(s));
+        v.durationMsSum += Number(s.duration_ms) || 0;
+      }
+      const byVersion = Array.from(byVersionMap.values())
+        .map((v) => ({ ...v, players: v.players.size }))
+        .sort((a, b) => activityCompare(b.appVersion, a.appVersion) || b.sessions - a.sessions || activityCompare(a.platform, b.platform));
+      const { buckets: _sessionBuckets, ...series } = chartActivitySeries(cur, buckets);
+      const sessions = {
+        total: cur.length,
+        crashed: cur.filter((s) => s.status === 'crashed').length,
+        errored: cur.filter((s) => Number(s.errors_count) > 0).length,
+        players: new Set(cur.map(actorOf)).size,
+        crashedPlayers: new Set(cur.filter((s) => s.status === 'crashed').map(actorOf)).size,
+        durationMsSum: cur.reduce((a, s) => a + (Number(s.duration_ms) || 0), 0),
+        hiddenSessions: Number(rows.hiddenSessions) || 0,
+        byVersion,
+        series,
       };
 
-      for (const r of rows) {
-        const actor = r.user_id || r.install_id || r.session_id || 'anon';
-        const sk = r.session_id || actor;
-        totalActiveUsersSet.add(actor);
-        if (r.session_id) totalSessionsSet.add(r.session_id);
-        funnelStages.cold_launch.add(actor);
-        if (!hasExplicitAuth && r.user_id) funnelStages.auth_complete.add(actor);
-        const props = (r.properties && typeof r.properties === 'object') ? r.properties : {};
-        if (r.name === 'preload.completed') funnelStages.preload_complete.add(actor);
-        else if (r.name === 'auth.completed') funnelStages.auth_complete.add(actor);
-        else if (r.name === 'realtime.connected') {
-          if (!hasExplicitPreload) funnelStages.preload_complete.add(actor);
-          if (!hasExplicitAuth) funnelStages.auth_complete.add(actor);
-        } else if (r.name === 'scene.viewed') {
-          if (props.scene === 'home') {
-            if (!hasExplicitPreload) funnelStages.preload_complete.add(actor);
-            if (!hasExplicitAuth) funnelStages.auth_complete.add(actor);
-            funnelStages.home_reached.add(actor);
-          }
-          if (props.scene === 'casualGame' || props.scene === 'rankedGame') funnelStages.table_seated.add(actor);
-        } else if (r.name === 'panel.opened') {
-          if (!hasExplicitPreload) funnelStages.preload_complete.add(actor);
-          if (!hasExplicitAuth) funnelStages.auth_complete.add(actor);
-          funnelStages.home_reached.add(actor);
-          const m = panelMetrics.get(String(props.panel || ''));
-          if (m) { m.opens++; m.users.add(actor); }
-          if (['casual', 'ranked', 'tournament'].includes(String(props.panel || ''))) funnelStages.lobby_opened.add(actor);
-        } else if (r.name === 'panel.closed') {
-          const m = panelMetrics.get(String(props.panel || ''));
-          const dwellMs = Number(props.dwellMs ?? props.dwell_ms ?? 0);
-          if (m) {
-            if (m.opens === 0) { m.opens++; m.users.add(actor); }
-            if (dwellMs > 0) { m.totalDwellMs += dwellMs; m.dwellCount++; }
-            if (props.interacted === true || dwellMs >= 4500) m.interactedCount++;
-          }
-        } else if (r.name === 'queue.joined' || r.name === 'matchmaking.started') {
-          funnelStages.queue_joined.add(actor);
-        } else if (r.name === 'queue.matched' || r.name === 'matchmaking.seated') {
-          funnelStages.table_seated.add(actor);
-        } else if (r.name === 'hand.completed') {
-          funnelStages.hand_completed.add(actor);
-          handsCompletedBySession.set(sk, (handsCompletedBySession.get(sk) ?? 0) + 1);
-        } else if (r.name === 'turn.timeout') turnTimeouts++;
-        else if (r.name === 'table.left') {
-          const mode = String(props.mode || 'casual').toLowerCase() === 'tournament' ? 'tourney' : String(props.mode || 'casual').toLowerCase();
-          const hands = Number(props.handsPlayed ?? props.hands_played ?? 0) || 0;
-          const reason = String(props.reason || 'voluntary').toLowerCase();
-          if (reason in tableLeaveReasons) tableLeaveReasons[reason]++; else tableLeaveReasons.voluntary++;
-          if (hands > 0) {
-            funnelStages.hand_completed.add(actor);
-            handsTableLeftBySession.set(sk, (handsTableLeftBySession.get(sk) ?? 0) + hands);
-          }
-          if (modeStats[mode]) { modeStats[mode].tablesCompleted++; modeStats[mode].totalHandsPlayed += hands; }
-        } else if (r.name === 'game_summary.action') {
-          const choice = String(props.exitChoice ?? props.exit_choice ?? props.action ?? '');
-          if (choice === 'play_again' || choice === 'requeue') funnelStages.play_again.add(actor);
-        } else if (r.name === 'character.selected' || r.name === 'customize.equipped') {
-          const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
-          if (characterCounts.has(rawChar)) characterCounts.set(rawChar, characterCounts.get(rawChar) + 1);
-          const exprTok = extractExprToken(props.setKey ?? props.set_key ?? props.itemId ?? props.item_id);
-          if (exprTok) expressionSetCounts.set(exprTok, expressionSetCounts.get(exprTok) + 1);
-        } else if (r.name === 'character.expression_changed') {
-          const skey = String(props.setKey ?? props.set_key ?? 'default').toLowerCase();
-          if (expressionSetCounts.has(skey)) expressionSetCounts.set(skey, expressionSetCounts.get(skey) + 1);
-        } else if (r.name === 'store.item_previewed') {
-          const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
-          if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).previews++;
-          const exprTok = extractExprToken(props.setKey ?? props.set_key ?? props.itemId ?? props.item_id);
-          if (exprTok) expressionSetCounts.set(exprTok, expressionSetCounts.get(exprTok) + 1);
-        } else if (r.name === 'store.purchase_completed' || r.name === 'store.iap_completed') {
-          const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
-          if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).purchases++;
-          const exprTok = extractExprToken(props.setKey ?? props.set_key ?? props.itemId ?? props.item_id);
-          if (exprTok) expressionSetCounts.set(exprTok, expressionSetCounts.get(exprTok) + 1);
-        } else if (r.name === 'store.purchase_abandoned') {
-          purchaseAbandonedCount++;
-          const rawChar = String(props.characterId ?? props.character_id ?? props.itemId ?? props.item_id ?? '').toLowerCase().split('_')[0];
-          if (characterShowroomMap.has(rawChar)) characterShowroomMap.get(rawChar).abandons++;
-        } else if (r.name === 'economy.insufficient_funds') insufficientFundsCount++;
-        else if (r.name === 'realtime.disconnected' || r.name === 'realtime.reconnect_exhausted') realtimeDisconnects++;
-        else if (r.name === 'realtime.state_fallback') realtimeStateFallbacks++;
+      // Spans: start-up time per version (the platform's), and latency per name (platform and version).
+      const spanRows = (rows.spans || []).filter((s) => activityTime(s.created_at) >= cutoff && onPlatform(s));
+      const startup = new Map();
+      for (const s of spanRows) {
+        if (!ACTIVITY_STARTUP_SPANS.includes(s.name)) continue;
+        if (!startup.has(s.app_version)) startup.set(s.app_version, { sum: 0, count: 0 });
+        const g = startup.get(s.app_version);
+        g.sum += Number(s.duration_ms) || 0;
+        g.count++;
       }
-
-      let totalHandsCompleted = 0;
-      for (const sk of new Set([...handsCompletedBySession.keys(), ...handsTableLeftBySession.keys()])) {
-        totalHandsCompleted += Math.max(handsCompletedBySession.get(sk) ?? 0, handsTableLeftBySession.get(sk) ?? 0);
+      const startupByVersion = Array.from(startup.entries())
+        .map(([appVersion, g]) => ({ appVersion, avgMs: Math.round(g.sum / g.count), count: g.count }))
+        .sort((a, b) => activityCompare(b.appVersion, a.appVersion));
+      const spanGroups = new Map();
+      for (const s of spanRows.filter(onVersion)) {
+        if (!spanGroups.has(s.name)) spanGroups.set(s.name, { durations: [], errors: 0, platforms: new Set() });
+        const g = spanGroups.get(s.name);
+        g.durations.push(Number(s.duration_ms) || 0);
+        if (s.status !== 'ok') g.errors++;
+        g.platforms.add(s.platform);
       }
+      const spans = Array.from(spanGroups.entries()).map(([name, g]) => {
+        const sorted = g.durations.slice().sort((a, b) => a - b);
+        return {
+          name,
+          count: sorted.length,
+          errors: g.errors,
+          platforms: Array.from(g.platforms).sort(activityCompare),
+          p50Ms: activityPercentile(sorted, 50),
+          p95Ms: activityPercentile(sorted, 95),
+          p99Ms: activityPercentile(sorted, 99),
+        };
+      }).sort((a, b) => b.count - a.count || activityCompare(a.name, b.name));
 
-      const totalUsers = Math.max(1, totalActiveUsersSet.size);
+      const events = activityEvents((rows.productEvents || []).filter((e) => activityTime(e.event_ts) >= cutoff && onPlatform(e) && onVersion(e)), buckets);
+
+      return {
+        version: 1,
+        environment: options.environment || 'production',
+        windowHours: hours,
+        timeZone,
+        includeTest: Boolean(options.includeTest),
+        platform,
+        appVersion: version,
+        generatedAt: nowMs,
+        buckets: { unit: buckets.unit, starts: buckets.starts, end: buckets.end },
+        sessions,
+        startupByVersion,
+        events,
+        spans,
+      };
+    }
+
+    // Product events: the journey, the home panels, the tables left and why, hands per session and per
+    // bucket, character and set events by their raw ids, the queue events themselves and the counts.
+    function activityEvents(rows, buckets) {
+      const ev = rows.map((r) => {
+        const p = activityProps(r);
+        const rawMode = String(p.mode ?? 'casual').toLowerCase();
+        return {
+          row: r,
+          name: r.name,
+          p,
+          userId: r.user_id ? String(r.user_id) : '',
+          actor: (r.user_id ? String(r.user_id) : '') || r.install_id || r.session_id || 'anon',
+          sk: r.session_id || (r.user_id ? String(r.user_id) : '') || r.install_id || 'anon',
+          hands: activityNumber(p.handsPlayed ?? p.hands_played),
+          dwell: activityNumber(p.dwellMs ?? p.dwell_ms),
+          mode: rawMode === 'tournament' ? 'tourney' : rawMode,
+          interacted: p.interacted === true || p.interacted === 'true',
+        };
+      });
+      const distinct = (list) => new Set(list.map((e) => e.actor)).size;
+      const explicitPreload = ev.some((e) => e.name === 'preload.completed');
+      const explicitAuth = ev.some((e) => e.name === 'auth.completed');
+      const home = (e) => e.name === 'scene.viewed' && e.p.scene === 'home';
+      const funnel = {
+        coldLaunch: distinct(ev),
+        preloadComplete: distinct(ev.filter((e) => e.name === 'preload.completed'
+          || (!explicitPreload && (e.name === 'realtime.connected' || e.name === 'panel.opened' || home(e))))),
+        authComplete: distinct(ev.filter((e) => e.name === 'auth.completed'
+          || (!explicitAuth && (e.userId !== '' || e.name === 'realtime.connected' || e.name === 'panel.opened' || home(e))))),
+        homeReached: distinct(ev.filter((e) => e.name === 'panel.opened' || home(e))),
+        lobbyOpened: distinct(ev.filter((e) => e.name === 'panel.opened' && ['casual', 'ranked', 'tournament'].includes(e.p.panel))),
+        queueJoined: distinct(ev.filter((e) => e.name === 'queue.joined' || e.name === 'matchmaking.started')),
+        tableSeated: distinct(ev.filter((e) => e.name === 'queue.matched' || e.name === 'matchmaking.seated'
+          || (e.name === 'scene.viewed' && ['casualGame', 'rankedGame'].includes(e.p.scene)))),
+        handCompleted: distinct(ev.filter((e) => e.name === 'hand.completed' || (e.name === 'table.left' && e.hands > 0))),
+        playAgain: distinct(ev.filter((e) => e.name === 'game_summary.action'
+          && ['play_again', 'requeue'].includes(String(e.p.exitChoice ?? e.p.exit_choice ?? e.p.action ?? '')))),
+      };
+
+      // A panel's opens are its open events (a close with no open in the window counts one); its players
+      // are those who opened it (who closed it, when nobody's open is in the window).
+      const panelMap = new Map();
+      for (const e of ev) {
+        if (e.name !== 'panel.opened' && e.name !== 'panel.closed') continue;
+        const panel = e.p.panel == null ? '' : String(e.p.panel);
+        if (panel === '') continue;
+        if (!panelMap.has(panel)) panelMap.set(panel, { opened: 0, closed: 0, openers: new Set(), all: new Set(), dwellMsSum: 0, dwellCount: 0, interacted: 0 });
+        const m = panelMap.get(panel);
+        m.all.add(e.actor);
+        if (e.name === 'panel.opened') {
+          m.opened++;
+          m.openers.add(e.actor);
+        } else {
+          m.closed++;
+          if (e.dwell > 0) { m.dwellMsSum += e.dwell; m.dwellCount++; }
+          if (e.interacted || e.dwell >= 4500) m.interacted++;
+        }
+      }
+      const panels = Array.from(panelMap.entries()).map(([panel, m]) => ({
+        panel,
+        opens: Math.max(m.opened, Math.min(m.closed, 1)),
+        players: m.opened > 0 ? m.openers.size : m.all.size,
+        dwellMsSum: m.dwellMsSum,
+        dwellCount: m.dwellCount,
+        interacted: m.interacted,
+      })).sort((a, b) => activityCompare(a.panel, b.panel));
+
+      // Tables left per mode, and why (an unknown reason is a voluntary leave).
+      const tableMap = new Map();
+      const leaveReasons = { voluntary: 0, busted_chips: 0, timeout_kicked: 0, disconnected: 0 };
+      for (const e of ev) {
+        if (e.name !== 'table.left') continue;
+        if (['casual', 'ranked', 'tourney'].includes(e.mode)) {
+          if (!tableMap.has(e.mode)) tableMap.set(e.mode, { mode: e.mode, tables: 0, hands: 0 });
+          const t = tableMap.get(e.mode);
+          t.tables++;
+          t.hands += e.hands;
+        }
+        const reason = e.p.reason == null ? null : String(e.p.reason).toLowerCase();
+        if (reason === 'busted_chips' || reason === 'timeout_kicked' || reason === 'disconnected') leaveReasons[reason]++;
+        else leaveReasons.voluntary++;
+      }
+      const tables = Array.from(tableMap.values()).sort((a, b) => activityCompare(a.mode, b.mode));
+
+      // Hands completed per session: its hand events, or what its table leaves report, whichever is more.
+      const perSession = new Map();
+      for (const e of ev) {
+        if (e.name !== 'hand.completed' && e.name !== 'table.left') continue;
+        if (!perSession.has(e.sk)) perSession.set(e.sk, { completed: 0, left: 0 });
+        const s = perSession.get(e.sk);
+        if (e.name === 'hand.completed') s.completed++;
+        else s.left += e.hands;
+      }
+      let handsCompleted = 0;
+      for (const s of perSession.values()) handsCompleted += Math.max(s.completed, s.left);
+
+      const count = (names) => ev.filter((e) => names.includes(e.name)).length;
+      const counts = {
+        turnTimeouts: count(['turn.timeout']),
+        insufficientFunds: count(['economy.insufficient_funds']),
+        purchaseAbandoned: count(['store.purchase_abandoned']),
+        realtimeDisconnects: count(['realtime.disconnected', 'realtime.reconnect_exhausted']),
+        realtimeStateFallbacks: count(['realtime.state_fallback']),
+      };
+
+      // Character and set events by the character (the id before its first underscore) and the raw set
+      // or item id; the portal reads the set word out of it.
+      const itemMap = new Map();
+      for (const e of ev) {
+        if (!ACTIVITY_ITEM_EVENTS.includes(e.name)) continue;
+        const character = String(e.p.characterId ?? e.p.character_id ?? e.p.itemId ?? e.p.item_id ?? '').toLowerCase().split('_')[0];
+        const set = e.name === 'character.expression_changed'
+          ? String(e.p.setKey ?? e.p.set_key ?? 'default').toLowerCase()
+          : String(e.p.setKey ?? e.p.set_key ?? e.p.itemId ?? e.p.item_id ?? '').toLowerCase();
+        const key = `${e.name}\u0000${character}\u0000${set}`;
+        if (!itemMap.has(key)) itemMap.set(key, { name: e.name, character, set, count: 0 });
+        itemMap.get(key).count++;
+      }
+      const items = Array.from(itemMap.values())
+        .sort((a, b) => activityCompare(a.name, b.name) || activityCompare(a.character, b.character) || activityCompare(a.set, b.set));
+
+      const { buckets: _handBuckets, ...handSeries } = chartHandSeries(rows, buckets);
+
+      const queue = rows.filter((r) => ACTIVITY_QUEUE_EVENTS.includes(r.name))
+        .map((r) => ({
+          name: r.name, environment: r.environment, platform: r.platform, user_id: r.user_id ?? null,
+          session_id: r.session_id ?? null, install_id: r.install_id ?? null, event_ts: r.event_ts, properties: activityProps(r),
+        }))
+        .sort((a, b) => activityTime(b.event_ts) - activityTime(a.event_ts));
+      const queueEvents = queue.slice(0, ACTIVITY_QUEUE_LIMIT).reverse();
+
+      return {
+        total: ev.length,
+        actors: distinct(ev),
+        sessions: new Set(rows.map((r) => r.session_id).filter(Boolean)).size,
+        funnel,
+        panels,
+        tables,
+        leaveReasons,
+        handsCompleted,
+        counts,
+        items,
+        handSeries,
+        queueEvents,
+        queueEventsTruncated: queue.length > ACTIVITY_QUEUE_LIMIT,
+      };
+    }
+
+    // Players, Games and Economy from the activity totals: the view the portal drew from rows before
+    // phase 2. Queue attempts come from the queue events through aggregateQueueAttempts, the one rule.
+    function radarFromActivity(act, newPlayers) {
+      const e = act.events;
+      const queueAttempts = aggregateQueueAttempts(e.queueEvents || []);
+      const totalUsers = Math.max(1, Number(e.actors) || 0);
+      const panelsByKey = new Map((e.panels || []).map(p => [p.panel, p]));
       const featureLeaderboard = Object.entries(ALL_HOME_PANELS_META).map(([panelKey, meta]) => {
-        const m = panelMetrics.get(panelKey);
-        const dauSharePct = Number(((m.users.size / totalUsers) * 100).toFixed(1));
-        const avgDwellSec = m.dwellCount > 0 ? Number((m.totalDwellMs / m.dwellCount / 1000).toFixed(1)) : 0;
-        const interactionRatePct = m.opens > 0 ? Number(((m.interactedCount / m.opens) * 100).toFixed(1)) : 0;
-        const opensPerUser = m.users.size > 0 ? Number((m.opens / m.users.size).toFixed(1)) : 0;
+        const m = panelsByKey.get(panelKey) || { opens: 0, players: 0, dwellMsSum: 0, dwellCount: 0, interacted: 0 };
+        const opens = Number(m.opens) || 0;
+        const users = Number(m.players) || 0;
+        const dauSharePct = Number(((users / totalUsers) * 100).toFixed(1));
+        const avgDwellSec = Number(m.dwellCount) > 0 ? Number((Number(m.dwellMsSum) / Number(m.dwellCount) / 1000).toFixed(1)) : 0;
+        const interactionRatePct = opens > 0 ? Number(((Number(m.interacted) / opens) * 100).toFixed(1)) : 0;
+        const opensPerUser = users > 0 ? Number((opens / users).toFixed(1)) : 0;
         let status = 'healthy';
         if (dauSharePct >= 45 && interactionRatePct >= 65) status = 'loved';
         else if (dauSharePct < 12) status = 'ignored';
         else if (dauSharePct < 25 || interactionRatePct < 45) status = 'underused';
-        return { panelKey, label: meta.label, group: meta.group, opens: m.opens, opensPerUser, uniqueUsers: m.users.size, dauSharePct, avgDwellSec, interactionRatePct, status };
+        return { panelKey, label: meta.label, group: meta.group, opens, opensPerUser, uniqueUsers: users, dauSharePct, avgDwellSec, interactionRatePct, status };
       }).sort((a, b) => b.dauSharePct - a.dauSharePct || b.opens - a.opens);
 
-      const gameModes = Object.entries(modeStats).map(([mode, st]) => ({
-        ...queueAttempts[mode],
-        mode,
-        queueJoins: st.queueJoins,
-        cancelRatePct: st.queueJoins > 0 ? Number(((st.queueCancels / st.queueJoins) * 100).toFixed(1)) : 0,
-        avgWaitSec: (st.queueMatches + st.queueCancels) > 0 ? Number((st.totalWaitMs / (st.queueMatches + st.queueCancels) / 1000).toFixed(1)) : 0,
-        aiFallbackPct: st.queueMatches > 0 ? Number(((st.aiFallbackMatches / st.queueMatches) * 100).toFixed(1)) : 0,
-        avgHandsPerSession: st.tablesCompleted > 0 ? Number((st.totalHandsPlayed / st.tablesCompleted).toFixed(1)) : 0,
-      }));
+      const tablesByMode = new Map((e.tables || []).map(t => [t.mode, t]));
+      const gameModes = ['casual', 'ranked', 'tourney'].map(mode => {
+        const st = queueAttempts[mode];
+        const t = tablesByMode.get(mode) || { tables: 0, hands: 0 };
+        const tables = Number(t.tables) || 0;
+        return {
+          ...st,
+          mode,
+          queueJoins: st.queueJoins,
+          cancelRatePct: st.queueJoins > 0 ? Number(((st.queueCancels / st.queueJoins) * 100).toFixed(1)) : 0,
+          avgWaitSec: (st.queueMatches + st.queueCancels) > 0 ? Number((st.totalWaitMs / (st.queueMatches + st.queueCancels) / 1000).toFixed(1)) : 0,
+          aiFallbackPct: st.queueMatches > 0 ? Number(((st.aiFallbackMatches / st.queueMatches) * 100).toFixed(1)) : 0,
+          avgHandsPerSession: tables > 0 ? Number((Number(t.hands) / tables).toFixed(1)) : 0,
+        };
+      });
 
+      // Characters and sets from the grouped item events: the character before its first underscore,
+      // the set word read out of the raw set or item id.
+      const characterCounts = new Map([['anya', 0], ['amara', 0], ['brutus', 0], ['lenny', 0]]);
+      const showroom = new Map(Array.from(characterCounts.keys(), c => [c, { previews: 0, purchases: 0, abandons: 0 }]));
+      const expressionSetCounts = new Map([['default', 0], ['set1', 0], ['set2', 0], ['spades', 0], ['hearts', 0], ['diamonds', 0], ['clubs', 0]]);
+      const setWord = (raw) => String(raw || '').toLowerCase().split(/[_-\s]+/).find(p => expressionSetCounts.has(p)) || null;
+      for (const item of e.items || []) {
+        const n = Number(item.count) || 0;
+        const word = item.name === 'character.expression_changed'
+          ? (expressionSetCounts.has(item.set) ? item.set : null)
+          : item.name === 'store.purchase_abandoned' ? null : setWord(item.set);
+        if (word) expressionSetCounts.set(word, expressionSetCounts.get(word) + n);
+        if (!characterCounts.has(item.character)) continue;
+        if (item.name === 'character.selected' || item.name === 'customize.equipped') characterCounts.set(item.character, characterCounts.get(item.character) + n);
+        else if (item.name === 'store.item_previewed') showroom.get(item.character).previews += n;
+        else if (item.name === 'store.purchase_completed' || item.name === 'store.iap_completed') showroom.get(item.character).purchases += n;
+        else if (item.name === 'store.purchase_abandoned') showroom.get(item.character).abandons += n;
+      }
       const totalCharSel = Math.max(1, Array.from(characterCounts.values()).reduce((a, b) => a + b, 0));
       const characterPopularity = Array.from(characterCounts.entries()).map(([characterId, count]) => ({
         characterId, count, sharePct: Number(((count / totalCharSel) * 100).toFixed(1)),
       })).sort((a, b) => b.count - a.count);
-
-      const characterShowroom = Array.from(characterShowroomMap.entries()).map(([characterId, sr]) => {
+      const characterShowroom = Array.from(showroom.entries()).map(([characterId, sr]) => {
         const sharePct = characterPopularity.find(c => c.characterId === characterId)?.sharePct ?? 0;
         return {
           characterId,
@@ -2605,39 +2789,50 @@
           conversionPct: sr.previews > 0 ? Number(((sr.purchases / sr.previews) * 100).toFixed(1)) : 0,
         };
       }).sort((a, b) => b.equippedCount - a.equippedCount);
-
       const totalExprSel = Math.max(1, Array.from(expressionSetCounts.values()).reduce((a, b) => a + b, 0));
       const expressionPopularity = Array.from(expressionSetCounts.entries()).map(([setKey, count]) => ({
         setKey, count, sharePct: Number(((count / totalExprSel) * 100).toFixed(1)),
       })).sort((a, b) => b.count - a.count);
 
-      const topFunnelCount = Math.max(1, funnelStages.cold_launch.size);
+      const f = e.funnel || {};
+      const topFunnelCount = Math.max(1, Number(f.coldLaunch) || 0);
       const journeyFunnel = [
-        { step: 'App Launch', users: funnelStages.cold_launch.size },
-        { step: 'Assets Preloaded', users: funnelStages.preload_complete.size },
-        { step: 'Authenticated', users: funnelStages.auth_complete.size },
-        { step: 'Home Reached', users: funnelStages.home_reached.size },
-        { step: 'Lobby Opened', users: funnelStages.lobby_opened.size },
-        { step: 'Queue Joined', users: funnelStages.queue_joined.size },
-        { step: 'Seated at Table', users: funnelStages.table_seated.size },
-        { step: 'Completed 1+ Hands', users: funnelStages.hand_completed.size },
-        { step: 'Tapped Play Again', users: funnelStages.play_again.size },
-      ].map((s, idx, arr) => ({
-        ...s,
-        conversionFromStartPct: Number(((s.users / topFunnelCount) * 100).toFixed(1)),
-        dropOffFromPrevPct: idx > 0 && arr[idx - 1].users > 0 ? Number((((arr[idx - 1].users - s.users) / arr[idx - 1].users) * 100).toFixed(1)) : 0,
-      }));
+        { step: 'App Launch', users: f.coldLaunch },
+        { step: 'Assets Preloaded', users: f.preloadComplete },
+        { step: 'Authenticated', users: f.authComplete },
+        { step: 'Home Reached', users: f.homeReached },
+        { step: 'Lobby Opened', users: f.lobbyOpened },
+        { step: 'Queue Joined', users: f.queueJoined },
+        { step: 'Seated at Table', users: f.tableSeated },
+        { step: 'Completed 1+ Hands', users: f.handCompleted },
+        { step: 'Tapped Play Again', users: f.playAgain },
+      ].map((s, idx, arr) => {
+        const users = Number(s.users) || 0;
+        const prev = idx > 0 ? Number(arr[idx - 1].users) || 0 : 0;
+        return {
+          step: s.step,
+          users,
+          conversionFromStartPct: Number(((users / topFunnelCount) * 100).toFixed(1)),
+          dropOffFromPrevPct: idx > 0 && prev > 0 ? Number((((prev - users) / prev) * 100).toFixed(1)) : 0,
+        };
+      });
 
-      const totalLeaves = Math.max(1, Object.values(tableLeaveReasons).reduce((a, b) => a + b, 0));
-      const tableLeaveBreakdown = Object.entries(tableLeaveReasons).map(([reason, count]) => ({
-        reason, count, sharePct: Number(((count / totalLeaves) * 100).toFixed(1)),
-      }));
+      const reasons = e.leaveReasons || {};
+      const leaveKeys = ['voluntary', 'busted_chips', 'timeout_kicked', 'disconnected'];
+      const totalLeaves = Math.max(1, leaveKeys.reduce((a, k) => a + (Number(reasons[k]) || 0), 0));
+      const tableLeaveBreakdown = leaveKeys.map(reason => {
+        const count = Number(reasons[reason]) || 0;
+        return { reason, count, sharePct: Number(((count / totalLeaves) * 100).toFixed(1)) };
+      });
 
+      const counts = e.counts || {};
+      const totalHandsCompleted = Number(e.handsCompleted) || 0;
+      const turnTimeouts = Number(counts.turnTimeouts) || 0;
       return {
-        newPlayers: Array.isArray(snap.new_players) ? snap.new_players : null,
-        totalTrackedUsers: totalActiveUsersSet.size,
-        totalTrackedSessions: totalSessionsSet.size,
-        totalProductEvents: rows.length,
+        newPlayers: Array.isArray(newPlayers) ? newPlayers : null,
+        totalTrackedUsers: Number(e.actors) || 0,
+        totalTrackedSessions: Number(e.sessions) || 0,
+        totalProductEvents: Number(e.total) || 0,
         featureLeaderboard,
         gameModes,
         characterPopularity,
@@ -2649,35 +2844,50 @@
           totalHandsCompleted,
           turnTimeouts,
           turnTimeoutRatePct: totalHandsCompleted > 0 ? Number(((turnTimeouts / totalHandsCompleted) * 100).toFixed(2)) : 0,
-          insufficientFundsCount,
-          purchaseAbandonedCount,
-          realtimeDisconnects,
-          realtimeStateFallbacks,
+          insufficientFundsCount: Number(counts.insufficientFunds) || 0,
+          purchaseAbandonedCount: Number(counts.purchaseAbandoned) || 0,
+          realtimeDisconnects: Number(counts.realtimeDisconnects) || 0,
+          realtimeStateFallbacks: Number(counts.realtimeStateFallbacks) || 0,
         },
+        handSeries: { buckets: act.buckets, ...(e.handSeries || { casual: [], ranked: [], tourney: [] }) },
+        queueEventsTruncated: Boolean(e.queueEventsTruncated),
+        source: act.source,
       };
     }
 
-    function computeVitalsFromSnapshot(snap) {
-      const rows = filterRowsByState(snap.performance_spans);
-      const grouped = new Map();
-      for (const r of rows) {
-        if (!grouped.has(r.name)) grouped.set(r.name, { durations: [], errors: 0, platforms: new Set() });
-        const g = grouped.get(r.name);
-        g.durations.push(Number(r.duration_ms || 0));
-        if (r.status !== 'ok') g.errors++;
-        g.platforms.add(r.platform);
-      }
-      const pct = (sorted, p) => sorted.length === 0 ? 0 : Math.round(sorted[Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))]);
-      const spans = Array.from(grouped.entries()).map(([name, g]) => {
-        const sorted = [...g.durations].sort((a, b) => a - b);
-        const count = sorted.length;
-        return {
-          name, count, platforms: Array.from(g.platforms),
-          p50Ms: pct(sorted, 50), p95Ms: pct(sorted, 95), p99Ms: pct(sorted, 99),
-          errorRatePct: count > 0 ? Number(((g.errors / count) * 100).toFixed(2)) : 0,
-        };
-      }).sort((a, b) => b.count - a.count);
-      return { spans };
+    function vitalsFromActivity(act) {
+      return {
+        spans: (act.spans || []).map(sp => ({
+          name: sp.name,
+          count: Number(sp.count) || 0,
+          platforms: sp.platforms || [],
+          p50Ms: Number(sp.p50Ms) || 0,
+          p95Ms: Number(sp.p95Ms) || 0,
+          p99Ms: Number(sp.p99Ms) || 0,
+          errorRatePct: Number(sp.count) > 0 ? Number(((Number(sp.errors) / Number(sp.count)) * 100).toFixed(2)) : 0,
+        })),
+        source: act.source,
+      };
+    }
+
+    // The totals from the snapshot's own rows: the demo (every row), or a backend before 1.85.0 has
+    // no `activity` action (the newest rows only, as the portal counted before phase 2).
+    function snapshotActivity(snap, source) {
+      const rows = (list) => filterRowsByState(list, false);
+      const act = buildCortexActivity({
+        sessions: rows(snap.sessions),
+        productEvents: rows(snap.product_events),
+        spans: rows(snap.performance_spans),
+        hiddenSessions: testTrafficFromSnapshot(snap)?.hiddenSessions || 0,
+      }, {
+        environment: state.environment,
+        windowHours: state.windowHours,
+        includeTest: state.includeTest,
+        platform: state.platform,
+        appVersion: state.appVersion,
+      });
+      act.source = source;
+      return act;
     }
 
     let authKeyVisible = false;
@@ -2704,6 +2914,7 @@
       state.includeTest = readIncludeTest(env);
       localStorage.setItem('cortex_active_env_v2', env);
       state.edgeSnapCache = null;
+      state.edgeActivityCache = null;
       state.edgeLastError = null;
       syncEnvButtonsUI();
       renderEdgeGateAuthPrompt(currentInputVal);
@@ -2781,6 +2992,7 @@
       state.ownerKey = val;
       localStorage.setItem('cortex_owner_key', val);
       state.edgeSnapCache = null;
+      state.edgeActivityCache = null;
       const snap = await fetchEdgeSnapshot(true);
       authVerifying = false;
       if (!snap) {
@@ -2845,6 +3057,7 @@
       state.dataSource = mode;
       localStorage.setItem('cortex_data_source', mode);
       state.edgeSnapCache = null;
+      state.edgeActivityCache = null;
       openEdgeGateDrawer();
       await loadVersions();
       await refreshActiveTab();
@@ -2855,6 +3068,7 @@
       state.ownerKey = val;
       localStorage.setItem('cortex_owner_key', val);
       state.edgeSnapCache = null;
+      state.edgeActivityCache = null;
       closeEdgeGateDrawer();
       await loadVersions();
       await refreshActiveTab();
@@ -2960,6 +3174,44 @@
     }
 
     const TAB_ENDPOINTS = { pulse: 'pulse', players: 'radar', games: 'radar', economy: 'radar', triage: 'triage', vitals: 'vitals', inbox: 'inbox' };
+    const TOTALS_TABS = ['pulse', 'players', 'games', 'economy', 'vitals'];
+
+    function viewerTimeZone() {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    }
+
+    // The server's totals for the filters (cortex-admin `activity`, MinamoPokerBE 1.85.0), kept until
+    // the next refresh like the snapshot; null from a backend without the action (it answers 400).
+    async function fetchEdgeActivity() {
+      if (!state.ownerKey) return null;
+      const params = new URLSearchParams({
+        action: 'activity',
+        environment: state.environment,
+        windowHours: String(state.windowHours),
+        timeZone: viewerTimeZone(),
+        includeTest: String(state.includeTest),
+        platform: state.platform,
+        appVersion: state.appVersion,
+      }).toString();
+      if (state.edgeActivityCache && state.edgeActivityCache.has(params)) return state.edgeActivityCache.get(params);
+      try {
+        const res = await fetch(`${getEdgeUrl(state.environment)}?${params}`, {
+          headers: {
+            Authorization: `Bearer ${state.ownerKey}`,
+            'x-cortex-owner-key': state.ownerKey,
+            Accept: 'application/json',
+          },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body.activity || !body.activity.sessions) return null;
+        const act = { ...body.activity, source: 'server' };
+        if (!state.edgeActivityCache) state.edgeActivityCache = new Map();
+        state.edgeActivityCache.set(params, act);
+        return act;
+      } catch {
+        return null;
+      }
+    }
     const TAB_RENDERERS = {
       pulse: (root, d) => renderPulse(root, d),
       players: (root, d) => renderPlayers(root, d),
@@ -3013,32 +3265,46 @@
           document.getElementById('triageBadge').textContent = String(issues.filter(i => i.status !== 'resolved').length);
           document.getElementById('inboxBadge').textContent = String(reports.filter(r => r.status === 'open').length);
 
-          // The same series the local server adds (server/charts.js), over the window's buckets
-          const buckets = chartTimeBuckets(state.windowHours);
+          // Pulse, Players, Games, Economy and Vitals draw from the totals: the server's (1.85.0), else
+          // the snapshot's own rows (the demo's are all of them; an older backend's are capped).
           let data;
-          if (tab === 'pulse') data = { ...computePulseFromSnapshot(snap), activity: chartActivitySeries(filterRowsByState(snap.sessions), buckets) };
-          else if (TAB_ENDPOINTS[tab] === 'radar') data = { ...computeRadarFromSnapshot(snap), handSeries: chartHandSeries(filterRowsByState(snap.product_events), buckets) };
-          else if (tab === 'triage') data = { issues };
-          else if (tab === 'vitals') data = computeVitalsFromSnapshot(snap);
+          if (TOTALS_TABS.includes(tab)) {
+            const act = state.environment === 'demo'
+              ? snapshotActivity(snap, 'demo')
+              : (await fetchEdgeActivity()) || snapshotActivity(snap, 'rows');
+            if (!current()) return;
+            if (tab === 'pulse') data = pulseFromActivity(act, snap);
+            else if (tab === 'vitals') data = vitalsFromActivity(act);
+            else data = radarFromActivity(act, snap.new_players);
+          } else if (tab === 'triage') data = { issues };
           else data = { reports };
           TAB_RENDERERS[tab](root, data);
           if (state.environment === 'demo' || !state.lastRefreshedAt) state.lastRefreshedAt = Date.now();
           return;
         }
 
-        // Update badges in background
-        fetch(`/api/triage?${queryStr()}`).then(r => r.json()).then(d => {
-          const openCount = (d.issues || []).filter(i => i.status !== 'resolved').length;
-          document.getElementById('triageBadge').textContent = String(openCount);
-        }).catch(() => {});
-        fetch(`/api/inbox?${queryStr()}`).then(r => r.json()).then(d => {
-          const openCount = (d.reports || []).filter(i => i.status === 'open').length;
-          document.getElementById('inboxBadge').textContent = String(openCount);
-        }).catch(() => {});
-
-        const res = await fetch(`/api/${TAB_ENDPOINTS[tab]}?${queryStr()}`);
-        const data = await res.json();
+        // Local server: the badges, Triage and Inbox from its lists; the totals from /api/activity
+        // (the project's get_cortex_activity with its service key, else this server's own rows).
+        const [triage, inbox] = await Promise.all([
+          fetch(`/api/triage?${queryStr()}`).then(r => r.json()).catch(() => ({ issues: [] })),
+          fetch(`/api/inbox?${queryStr()}`).then(r => r.json()).catch(() => ({ reports: [] })),
+        ]);
         if (!current()) return;
+        document.getElementById('triageBadge').textContent = String((triage.issues || []).filter(i => i.status !== 'resolved').length);
+        document.getElementById('inboxBadge').textContent = String((inbox.reports || []).filter(i => i.status === 'open').length);
+
+        let data;
+        if (TOTALS_TABS.includes(tab)) {
+          const res = await fetch(`/api/activity?${queryStr()}&timeZone=${encodeURIComponent(viewerTimeZone())}`);
+          const body = await res.json();
+          if (!current()) return;
+          if (!res.ok || !body.activity) throw new Error(body.error || `Cortex answered ${res.status}`);
+          const act = { ...body.activity, source: body.source };
+          if (tab === 'pulse') data = pulseFromActivity(act, { issues: triage.issues || [], error_events: [], bug_reports: inbox.reports || [] });
+          else if (tab === 'vitals') data = vitalsFromActivity(act);
+          else data = radarFromActivity(act, body.newPlayers);
+        } else if (tab === 'triage') data = triage;
+        else data = inbox;
         TAB_RENDERERS[tab](root, data);
         state.lastRefreshedAt = Date.now();
       } finally {
@@ -3098,6 +3364,17 @@
     // Rows of a time chart's "Show numbers" table, newest first.
     function bucketRows(buckets, columns) {
       return buckets.starts.map((_, i) => [chartBucketTitle(buckets, i), ...columns.map(values => values[i] ?? 0)]).reverse();
+    }
+
+    // A line above the charts when the totals were counted from rows rather than by the server.
+    function totalsNote(source) {
+      if (source === 'rows') {
+        return `<div class="totals-note">Counted from the newest snapshot rows only: this backend has no server totals yet (MinamoPokerBE 1.85.0), so a long window comes up short.</div>`;
+      }
+      if (source === 'local') {
+        return `<div class="totals-note">Counted from the rows this server has synced. Add this environment's service key to MinamoCortex/.env for the server's own totals.</div>`;
+      }
+      return '';
     }
 
     function renderPulse(root, data) {
@@ -3179,6 +3456,7 @@
       ) : '';
 
       root.innerHTML = `
+        ${totalsNote(data.source)}
         ${s.totalSessions === 0 && state.environment !== 'demo' ? `
           <div class="panel-card" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
             <div>
@@ -3340,6 +3618,7 @@
         .sort((a, b) => EXPRESSION_SET_ORDER.indexOf(a.setKey) - EXPRESSION_SET_ORDER.indexOf(b.setKey));
 
       root.innerHTML = `
+        ${totalsNote(data.source)}
         ${renderNewPlayersCard(data.newPlayers)}
 
         <div class="grid-2">
@@ -3403,6 +3682,7 @@
       `).join('');
 
       root.innerHTML = `
+        ${totalsNote(data.source)}
         <div class="kpi-grid">
           ${statTile({ label: 'Hands played', value: insights.totalHandsCompleted || 0, sub: capitalize(windowLabel()), spark: chartSparkline(handTotals) })}
           ${statTile({ label: 'Queue attempts', value: attempts, sub: modes.map(m => `${MODE_LABELS[m.mode] || m.mode} ${m.queueJoins}`).join(' · ') })}
@@ -3440,6 +3720,7 @@
       const previews = total('previews');
       const purchases = total('purchases');
       root.innerHTML = `
+        ${totalsNote(data.source)}
         <div class="panel-card">
           <div class="panel-title">Chips and money come next</div>
           <div class="panel-subtitle">Chips won and lost at tables, spins, chip and token buys, and store spend at list price in USD, per day, need new server totals (phase 3 of the Cortex redesign). Until then this tab shows what the apps report from the store.</div>
@@ -3519,7 +3800,7 @@
 
     function renderVitals(root, data) {
       const spans = data.spans || [];
-      root.innerHTML = panelCard(
+      root.innerHTML = totalsNote(data.source) + panelCard(
         'Latency',
         `Per operation, ${windowLabel()}: the bar runs from p50 to p95, the dot is p50 and the tick p99, on one log scale. Cold start, preload, RPCs, edge functions and realtime.`,
         chartRanges(spans.map(sp => ({ label: sp.name, p50Ms: sp.p50Ms, p95Ms: sp.p95Ms, p99Ms: sp.p99Ms, count: sp.count, errorRatePct: sp.errorRatePct })))
@@ -4221,6 +4502,7 @@
           body: JSON.stringify({ action: 'update_issue_status', issueId, status, resolvedInVersion: version }),
         });
         state.edgeSnapCache = null;
+        state.edgeActivityCache = null;
       } else {
         await fetch(`/api/triage/${issueId}/status`, {
           method: 'POST',
@@ -4248,6 +4530,7 @@
           body: JSON.stringify({ action: 'update_report_status', reportId, status }),
         });
         state.edgeSnapCache = null;
+        state.edgeActivityCache = null;
       } else {
         await fetch(`/api/inbox/${reportId}/status`, {
           method: 'POST',
@@ -4268,6 +4551,7 @@
       try {
         if (state.dataSource === 'edge' || state.environment === 'demo') {
           state.edgeSnapCache = null;
+          state.edgeActivityCache = null;
           await loadVersions();
           await refreshActiveTab();
           if (state.edgeLastError) {
@@ -4500,6 +4784,7 @@
         if (hours === state.windowHours) return;
         state.windowHours = hours;
         state.edgeSnapCache = null;
+        state.edgeActivityCache = null;
         updateHeader();
         document.getElementById('viewRoot').classList.add('refreshing');
         await loadVersions();
@@ -4550,6 +4835,7 @@
             state.ownerKey = '';
             localStorage.removeItem('cortex_owner_key');
             state.edgeSnapCache = null;
+            state.edgeActivityCache = null;
             state.edgeLastError = null;
             setPortalUnlocked(false);
           };
