@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#070a10" />
+  <meta name="theme-color" content="#000000" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Minamo Cortex" />
@@ -11,16 +11,20 @@
   <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%2338bdf8'/%3E%3Cstop offset='100%25' stop-color='%236366f1'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='180' height='180' rx='40' fill='url(%23g)'/%3E%3Ctext x='90' y='122' text-anchor='middle' font-family='-apple-system,BlinkMacSystemFont,sans-serif' font-size='102' font-weight='900' fill='%2305080f'%3EC%3C/text%3E%3C/svg%3E" />
   <title>Minamo Cortex · Observability & Product Analytics</title>
   <style>
+    /* Black and near black (owner, 2026-10-29): neutral greys, no blue tint; the environment and
+       status colours stay. Chart colours are the chart kit's (server/charts.js). */
     :root {
-      --bg: #070a10;
-      --bg-elevated: #0d121d;
-      --card: #111827;
-      --card-hover: #172033;
-      --border: #1e293b;
-      --border-subtle: #162032;
-      --text: #f8fafc;
-      --text-secondary: #cbd5e1;
-      --muted: #64748b;
+      --bg: #000000;
+      --bg-elevated: #050505;
+      --card: #0b0b0c;
+      --card-hover: #141416;
+      --surface: #070708;
+      --track: #19191c;
+      --border: #1f1f22;
+      --border-subtle: #161618;
+      --text: #f4f4f5;
+      --text-secondary: #b4b4bb;
+      --muted: #8b8b94;
       --accent: #38bdf8;
       --env-color: #f43f5e;
       --env-bg: rgba(244, 63, 94, 0.12);
@@ -54,66 +58,107 @@
       transition: border-color 0.2s ease;
     }
 
-    /* Top Persistent Context Bar */
+    /* One sticky header on every screen (owner, 2026-10-29): row 1 the environment, the time window,
+       the refresh state and the tools menu; row 2 the platform, test traffic and version; row 3 the
+       tabs. Nothing collapses, and the tabs never move to the bottom. */
     .topbar {
       position: sticky;
       top: 0;
       z-index: 40;
-      background: rgba(13, 18, 29, 0.94);
+      background: rgba(5, 5, 5, 0.94);
       backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
-      padding: 12px 24px;
+      padding-top: env(safe-area-inset-top);
+    }
+    .topbar-row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      flex-wrap: wrap;
+      gap: 10px;
+      padding: 8px max(24px, env(safe-area-inset-right)) 0 max(24px, env(safe-area-inset-left));
+      min-width: 0;
     }
+    .topbar-main { padding-top: 10px; }
+    .topbar-filters {
+      overflow-x: auto;
+      scrollbar-width: none;
+      overscroll-behavior-x: contain;
+    }
+    .topbar-filters::-webkit-scrollbar { display: none; }
+    .topbar-filters > * { flex-shrink: 0; }
+    .topbar-spacer { flex: 1; min-width: 0; }
 
     .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
+      flex-shrink: 0;
     }
     .brand-logo {
-      width: 34px;
-      height: 34px;
-      border-radius: 9px;
-      background: linear-gradient(135deg, var(--env-color), #6366f1);
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: #000;
+      border: 1px solid var(--env-color);
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 800;
-      font-size: 16px;
-      color: #fff;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      font-size: 15px;
+      color: var(--env-color);
     }
     .brand-title {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
       letter-spacing: -0.02em;
     }
-    .brand-sub {
-      font-size: 11px;
-      color: var(--muted);
-      font-weight: 500;
-    }
 
-    .context-controls {
+    /* The refresh state: "updated 2 min ago", a turning arrow while it loads */
+    .refresh-btn { gap: 7px; white-space: nowrap; }
+    .refresh-btn .refresh-icon { display: inline-block; font-size: 14px; line-height: 1; }
+    .refresh-btn.loading .refresh-icon { animation: cortex-spin 0.9s linear infinite; }
+    .refresh-btn.error { border-color: var(--red); color: #fda4af; }
+    @keyframes cortex-spin { to { transform: rotate(360deg); } }
+
+    /* The tools menu (Edge Gate, Table Timeline, Live Stream, Lock): tools, not filters */
+    .menu-wrap { position: relative; flex-shrink: 0; }
+    .icon-btn { min-width: 36px; justify-content: center; font-size: 16px; line-height: 1; padding: 6px 10px; }
+    .more-menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      min-width: 200px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 6px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
       display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
+      flex-direction: column;
+      gap: 2px;
+      z-index: 60;
     }
+    .more-menu[hidden] { display: none; }
+    .more-menu .btn, .more-menu form .btn {
+      width: 100%;
+      justify-content: flex-start;
+      background: transparent;
+      border-color: transparent;
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    .more-menu .btn:hover { background: var(--card-hover); border-color: transparent; }
+    .more-menu form { margin: 0; }
 
-    /* Environment Switcher Pills */
+    /* Segmented controls: environment, time window, platform, test traffic */
     .segmented {
       display: inline-flex;
-      background: #070a10;
+      background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 3px;
       gap: 2px;
+      flex-shrink: 0;
     }
     .segmented button {
       background: transparent;
@@ -128,6 +173,7 @@
       align-items: center;
       gap: 6px;
       transition: all 0.15s ease;
+      white-space: nowrap;
     }
     .segmented button:hover {
       color: var(--text);
@@ -147,7 +193,7 @@
     .env-dot.local { background: var(--green); box-shadow: 0 0 8px var(--green); }
 
     select.filter-select {
-      background: #070a10;
+      background: var(--bg);
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -158,15 +204,16 @@
       cursor: pointer;
     }
 
-    /* Navigation Tabs */
+    /* Navigation Tabs (row 3 of the header, scrolling sideways when they do not fit) */
     .nav-tabs {
-      background: var(--bg-elevated);
-      border-bottom: 1px solid var(--border);
-      padding: 0 24px;
+      padding: 4px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
       display: flex;
-      gap: 8px;
+      gap: 2px;
       overflow-x: auto;
+      scrollbar-width: none;
+      overscroll-behavior-x: contain;
     }
+    .nav-tabs::-webkit-scrollbar { display: none; }
     .nav-tab {
       background: transparent;
       border: none;
@@ -174,13 +221,14 @@
       color: var(--muted);
       font-size: 13px;
       font-weight: 600;
-      padding: 13px 16px;
+      padding: 11px 12px 10px;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
       transition: all 0.15s ease;
       white-space: nowrap;
+      flex-shrink: 0;
     }
     .nav-tab:hover { color: var(--text-secondary); }
     .nav-tab.active {
@@ -199,21 +247,37 @@
     .container {
       max-width: 1420px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 20px max(24px, env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+      transition: transform 0.2s ease;
     }
+    /* A refresh keeps the frame: the last render stays, dimmed, until the new one lands. */
+    #viewRoot { transition: opacity 0.15s ease; }
+    #viewRoot.refreshing { opacity: 0.5; pointer-events: none; }
 
-    .env-banner {
+    /* Pull down to refresh (owner, 2026-10-29): the indicator under the header */
+    .pull-indicator {
+      position: fixed;
+      left: 50%;
+      top: 0;
+      z-index: 39;
+      transform: translate(-50%, -48px);
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 10px 16px;
-      background: var(--env-bg);
-      border: 1px solid var(--env-color);
-      border-radius: 10px;
-      margin-bottom: 18px;
+      gap: 8px;
+      padding: 7px 14px;
+      border-radius: 99px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
       font-size: 12px;
       font-weight: 600;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
     }
+    .pull-indicator .refresh-icon { display: inline-block; transition: transform 0.15s ease; }
+    .pull-indicator.armed .refresh-icon { transform: rotate(180deg); }
+    .pull-indicator.loading .refresh-icon { animation: cortex-spin 0.9s linear infinite; }
 
     /* Morning Briefing Banner */
     .briefing-card {
@@ -221,7 +285,7 @@
       padding: 16px 20px;
       margin-bottom: 22px;
       border: 1px solid var(--border);
-      background: linear-gradient(135deg, rgba(17, 24, 39, 0.96), rgba(13, 18, 29, 0.96));
+      background: var(--card);
     }
     .briefing-card.healthy { border-left: 4px solid var(--green); }
     .briefing-card.warning { border-left: 4px solid var(--amber); }
@@ -251,7 +315,7 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: #080c14;
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 8px 12px;
@@ -295,6 +359,34 @@
       font-size: 12px;
       color: var(--text-secondary);
     }
+    /* Tiles inside a card sit one step off the card */
+    .panel-card .kpi-grid { gap: 12px; margin-bottom: 18px; }
+    .panel-card .kpi-card { background: var(--surface); padding: 14px; }
+    .panel-card .kpi-card .kpi-value { font-size: 22px; }
+    .issue-list { display: flex; flex-direction: column; }
+    .issue-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      padding: 11px 6px;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid var(--border-subtle);
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .issue-row:last-child { border-bottom: 0; }
+    .issue-row:hover { background: var(--card-hover); }
+    .issue-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .issue-title { font-size: 13px; font-weight: 600; color: var(--text); }
+    .issue-meta { font-size: 11px; color: var(--muted); }
+    .pill { white-space: nowrap; overflow-wrap: normal; flex-shrink: 0; }
+    .key-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 1px; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
 
     /* Delta Badges for Version Comparison */
     .delta-badge {
@@ -317,7 +409,7 @@
       margin-top: 12px;
     }
     .map-node {
-      background: #090d16;
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 13px 14px;
@@ -358,7 +450,7 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      background: #080c14;
+      background: var(--surface);
       border: 1px solid var(--border-subtle);
       border-radius: 10px;
       padding: 9px 13px;
@@ -391,6 +483,7 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
       gap: 20px;
+      align-items: start;
       margin-bottom: 24px;
     }
     .panel-card {
@@ -497,7 +590,7 @@
       padding: 4px 8px;
       border-radius: 6px;
       border: 1px solid var(--border);
-      background: #080c14;
+      background: var(--surface);
       color: var(--text);
       font-size: 11px;
       width: 190px;
@@ -509,7 +602,7 @@
     .bar-track {
       width: 100%;
       height: 8px;
-      background: #080b11;
+      background: var(--track);
       border-radius: 99px;
       overflow: hidden;
     }
@@ -543,7 +636,7 @@
     .tl-grid { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
     .tl-row { display: grid; grid-template-columns: minmax(0, 1fr) 86px minmax(0, 1fr); gap: 8px; align-items: start; }
     .tl-cell { min-width: 0; }
-    .tl-card { background: #080c14; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 6px 9px; font-size: 12px; }
+    .tl-card { background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 6px 9px; font-size: 12px; }
     .tl-card summary { cursor: pointer; list-style: none; }
     .tl-card summary::-webkit-details-marker { display: none; }
     .tl-card .tl-sub { font-size: 11px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
@@ -567,7 +660,7 @@
     }
 
     .code-block {
-      background: #05070b;
+      background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 14px;
@@ -657,7 +750,7 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 6px;
-      background: #080c14;
+      background: var(--surface);
       padding: 4px;
       border-radius: 10px;
       border: 1px solid var(--border);
@@ -692,7 +785,7 @@
       padding: 13px 64px 13px 14px;
       border-radius: 10px;
       border: 1px solid var(--border);
-      background: #080c14;
+      background: var(--surface);
       color: var(--text);
       font-size: 14px;
       font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
@@ -743,10 +836,10 @@
     }
 
     /* Responsive portal: keep content in the viewport and comparisons in their own scrollers. */
-    .mobile-filters-toggle, .nav-short { display: none; }
+    .env-short { display: none; }
     .grid-2 > *, .kpi-grid > *, .panel-card, .panel-header > *, .drawer > *,
     .journey-step > div, .brand > div, .report-card { min-width: 0; }
-    .panel-card, .drawer, .env-banner, .briefing-card, .kpi-card { overflow-wrap: anywhere; }
+    .panel-card, .drawer, .briefing-card, .kpi-card { overflow-wrap: anywhere; }
     .brand-logo, .env-dot { flex-shrink: 0; }
     .table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
     .table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
@@ -758,55 +851,120 @@
     .drawer > div:first-child > .btn { flex-shrink: 0; }
     .drawer .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)) !important; }
     body:has(.drawer-backdrop.open) { overflow: hidden; }
-    button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-    .topbar { padding-top: calc(12px + env(safe-area-inset-top)); }
+    button:focus-visible, select:focus-visible, [data-tip]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
     #authGateScreen {
       padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
     }
     .auth-gate-card { margin: auto; flex-shrink: 0; }
+    /* The page never rubber-bands or reloads itself on a pull: the portal's own pull refreshes. */
+    html, body { overscroll-behavior-y: none; }
+
+    /* Chart kit (server/charts.js): columns, bars, shares, ranges, sparklines and their tooltip */
+    .chart { position: relative; }
+    .chart-plot { position: relative; margin-left: 34px; }
+    .chart-grid { position: absolute; inset: 0; pointer-events: none; }
+    .chart-gridline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border-subtle); }
+    .chart-gridline span { position: absolute; right: calc(100% + 8px); top: -7px; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .chart-cols { position: absolute; inset: 0; display: flex; align-items: stretch; }
+    .chart-col { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; justify-content: center; cursor: default; outline-offset: -2px; }
+    .chart-col:hover, .chart-col.tip-on { background: rgba(255, 255, 255, 0.04); }
+    .chart-stack { width: min(24px, 70%); display: flex; flex-direction: column; gap: 2px; min-height: 2px; }
+    .chart-seg { display: block; flex-basis: 0; min-height: 2px; }
+    .chart-stack .chart-seg:first-child { border-radius: 4px 4px 0 0; }
+    .chart-col:hover .chart-seg, .chart-col.tip-on .chart-seg { filter: brightness(1.2); }
+    .chart-xlabels { position: relative; height: 18px; margin: 6px 0 0 34px; }
+    .chart-xlabels span { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); }
+    .chart-key { display: inline-flex; align-items: center; gap: 6px; }
+    .chart-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+    .chart-key strong { color: var(--text); font-weight: 700; }
+    .chart-key em { font-style: normal; color: var(--muted); }
+    .chart-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; border: 1px dashed var(--border); border-radius: 10px; }
+    .chart-hbars { display: flex; flex-direction: column; gap: 12px; }
+    .hbar { border-radius: 6px; outline-offset: 3px; }
+    .hbar-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 5px; }
+    .hbar-label { color: var(--text); font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+    .hbar-label.mono { font-family: "SF Mono", Menlo, monospace; font-weight: 500; font-size: 11px; }
+    .hbar-value { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .hbar-track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+    .hbar-fill { height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+    .hbar:hover .hbar-fill, .hbar.tip-on .hbar-fill { filter: brightness(1.2); }
+    .hbar-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .share-bar { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; }
+    .share-seg { display: block; flex-basis: 0; min-width: 3px; }
+    .share-seg:hover, .share-seg.tip-on { filter: brightness(1.2); }
+    .chart-ranges { display: flex; flex-direction: column; gap: 14px; }
+    .range-track { position: relative; height: 12px; background: var(--track); border-radius: 6px; }
+    .range-span { position: absolute; top: 2px; height: 8px; border-radius: 4px; background: #3987e5; opacity: 0.6; }
+    .range-dot { position: absolute; top: 1px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: #3987e5; box-shadow: 0 0 0 2px var(--card); }
+    .range-p99 { position: absolute; top: 0; width: 2px; height: 12px; margin-left: -1px; background: var(--text-secondary); }
+    .range-axis { position: relative; height: 16px; margin-top: 2px; }
+    .range-axis span { position: absolute; transform: translateX(-50%); font-size: 10px; color: var(--muted); white-space: nowrap; }
+    .range-axis span:first-child { transform: none; }
+    .range-axis span:last-child { transform: translateX(-100%); }
+    .chart-spark { display: block; width: 100%; height: 28px; margin-top: 10px; }
+    .chart-data { margin-top: 12px; font-size: 12px; }
+    .chart-data summary { cursor: pointer; color: var(--muted); font-weight: 600; width: max-content; }
+    .chart-data summary:hover { color: var(--text-secondary); }
+    .chart-data table { margin-top: 8px; }
+    .chart-tip {
+      position: fixed;
+      z-index: 200;
+      max-width: 240px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #101012;
+      border: 1px solid #2a2a2e;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-line;
+      pointer-events: none;
+    }
+    .chart-tip[hidden] { display: none; }
+    .chart-tip::first-line { color: var(--muted); font-weight: 600; }
+    /* A row that scrolls sideways fades at the edge that has more */
+    .scroll-fade.fade-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
+    .scroll-fade.fade-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px); mask-image: linear-gradient(to right, transparent, #000 32px); }
+    .scroll-fade.fade-left.fade-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+    /* One line of news (a sync result, a team mark), gone after a few seconds */
+    .portal-toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(20px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      z-index: 210;
+      max-width: min(560px, calc(100vw - 32px));
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: #101012;
+      border: 1px solid #2a2a2e;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .portal-toast[hidden] { display: none; }
+    .portal-toast.error { border-color: rgba(244, 63, 94, 0.6); }
+    .section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 6px 0 12px; }
 
     @media (max-width: 768px) {
       body { min-height: 100dvh; }
-      .topbar {
-        position: relative;
-        padding: calc(12px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 12px max(14px, env(safe-area-inset-left));
-        gap: 12px;
-      }
-      .brand { flex: 1; min-width: 0; gap: 9px; }
-      .brand-title { font-size: 15px; }
-      .brand-sub { display: none; }
-      .mobile-filters-toggle { display: inline-flex; }
-      .context-controls { width: 100%; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-      .context-controls > * { min-width: 0; max-width: 100%; }
-      #envSelector, #platformSelector, #testTrafficSelector { grid-column: 1 / -1; display: flex; }
-      .context-controls .segmented button { flex: 1; justify-content: center; padding: 8px 5px; }
-      .topbar:not(.filters-open) .context-controls > :not(#envSelector) { display: none; }
-      .context-controls > .btn, #logoutForm .btn { width: 100%; justify-content: center; }
-      .btn, .segmented button, .auth-gate-env-btn { min-height: 44px; }
-      .context-controls select { width: 100%; min-height: 44px; padding: 9px 8px; }
+      .topbar-row { gap: 8px; padding: 8px max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left)); }
+      .brand-title { display: none; }
+      .env-full { display: none; }
+      .env-short { display: inline; }
+      .segmented button { padding: 8px 9px; min-height: 36px; }
+      .refresh-status { display: none; }
+      .refresh-btn { min-width: 36px; justify-content: center; padding: 6px 10px; }
+      .btn { min-height: 36px; }
+      .nav-tabs { padding: 2px max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); }
+      .nav-tab { padding: 11px 10px 10px; font-size: 13px; }
       select.filter-select, input.auth-gate-input, #drawerOwnerKeyInput, .team-marker input { font-size: 16px !important; }
       .auth-gate-eye-btn { min-width: 44px; min-height: 40px; }
-      .nav-tabs {
-        position: fixed;
-        inset: auto 0 0;
-        z-index: 50;
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 0;
-        padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-        border-top: 1px solid var(--border);
-        border-bottom: none;
-        background: rgba(13, 18, 29, 0.98);
-        backdrop-filter: blur(16px);
-        overflow: visible;
-      }
-      .nav-tab { min-width: 0; min-height: 60px; justify-content: center; padding: 18px 2px 14px; font-size: 12px; position: relative; border-bottom: 0; border-top: 3px solid transparent; }
-      .nav-tab.active { border-top-color: var(--env-color); background: var(--env-bg); }
-      .nav-full { display: none; }
-      .nav-short { display: inline; }
-      .tab-badge { position: absolute; top: 3px; right: 5px; font-size: 9px; line-height: 12px; padding: 0 4px; }
-      .container { padding: 14px max(14px, env(safe-area-inset-right)) calc(86px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
-      .env-banner { flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; line-height: 1.5; }
+      .auth-gate-env-btn { min-height: 44px; }
+      .container { padding: 14px max(14px, env(safe-area-inset-right)) calc(28px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
       .grid-2 { grid-template-columns: minmax(0, 1fr); gap: 0; margin-bottom: 0; }
       .panel-card { padding: 16px; margin-bottom: 16px; }
       .panel-subtitle, .kpi-sub { line-height: 1.5; }
@@ -819,9 +977,9 @@
       .briefing-card { padding: 16px; margin-bottom: 16px; }
       .briefing-title { align-items: flex-start; line-height: 1.45; }
       .briefing-title > span:first-child { flex-shrink: 0; margin-top: 5px; }
-      .action-chip { width: 100%; min-width: 0; align-items: flex-start; line-height: 1.5; }
-      .action-chip > span:nth-child(2) { flex: 1; min-width: 0; }
-      .action-chip > .pill { max-width: 40%; flex-shrink: 0; }
+      .action-chip { width: 100%; min-width: 0; align-items: flex-start; line-height: 1.5; flex-wrap: wrap; }
+      .action-chip > span:nth-child(2) { flex: 1 1 200px; min-width: 0; }
+      .action-chip > .pill { max-width: 100%; }
       .drawer {
         width: 100%; max-width: 100%; border-left: 0;
         padding: calc(16px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
@@ -837,6 +995,7 @@
       #authGateScreen { padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
       .auth-gate-card { padding: 24px 18px; }
       .auth-gate-env-btn { font-size: 11px; padding: 9px 4px; gap: 4px; }
+      .chart-plot, .chart-xlabels { margin-left: 30px; }
     }
 
     @media (max-width: 600px) {
@@ -844,7 +1003,7 @@
       .table-scroll:has(.record-table) { overflow: visible; }
       .table-scroll .record-table, .record-table tbody { display: block; min-width: 0; width: 100%; }
       .record-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-      .record-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; background: #080c14; border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+      .record-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
       .record-table td { display: block; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; line-height: 1.5; }
       .record-table td:first-child, .record-table td[colspan] { grid-column: 1 / -1; }
       .record-table td[data-label]::before { content: attr(data-label); display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
@@ -863,28 +1022,67 @@
     <div class="auth-gate-card" id="authGateCard"></div>
   </div>
 
-  <!-- Persistent Top Context Bar -->
+  <!-- One sticky header: environment and tools, the filters, the tabs (owner, 2026-10-29) -->
   <header class="topbar" id="portalHeader">
-    <div class="brand">
-      <div class="brand-logo">C</div>
-      <div>
+    <div class="topbar-row topbar-main">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">C</div>
         <div class="brand-title">Minamo Cortex</div>
-        <div class="brand-sub">First-Party Observability, Crash Triage & Product Intelligence</div>
+      </div>
+
+      <!-- Environment Selector -->
+      <div class="segmented" id="envSelector" role="group" aria-label="Environment">
+        <button data-env="production"><span class="env-dot prod"></span><span class="env-full">Production</span><span class="env-short">Prod</span></button>
+        <button data-env="staging"><span class="env-dot staging"></span><span class="env-full">Staging</span><span class="env-short">Staging</span></button>
+        <button data-env="demo" class="active"><span class="env-dot local"></span><span class="env-full">Demo</span><span class="env-short">Demo</span></button>
+      </div>
+
+      <div class="topbar-spacer"></div>
+
+      <!-- Refresh: also a pull down on the page; the label says when the data last landed -->
+      <button class="btn refresh-btn" id="syncBtn" onclick="syncSupabaseNow()" title="Refresh from Supabase (or pull down on the page)" aria-label="Refresh">
+        <span class="refresh-icon" aria-hidden="true">⟳</span><span class="refresh-status" id="refreshStatus">Refresh</span>
+      </button>
+
+      <!-- Tools -->
+      <div class="menu-wrap">
+        <button type="button" class="btn icon-btn" id="moreMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="moreMenu" title="Tools" aria-label="Tools">⋯</button>
+        <div class="more-menu" id="moreMenu" hidden>
+          <!-- Edge Gate Mode / Auth Button -->
+          <button class="btn" id="edgeGateBtn" onclick="openEdgeGateDrawer()" title="Connect directly to Supabase Edge Gate (worldwide PWA mode)">
+            🔑 Edge Gate
+          </button>
+
+          <!-- Table Timeline Button (MIN-208) -->
+          <button class="btn" id="tableTimelineBtn" onclick="openTableTimeline()" title="One table's story: the apps' events beside the server's records">
+            Table Timeline
+          </button>
+
+          <!-- Live Tail Stream Button -->
+          <button class="btn" id="liveStreamBtn" onclick="openLiveStreamDrawer()">
+            <span class="env-dot local"></span> Live Stream
+          </button>
+
+          <!-- Lock Portal Button -->
+          <form method="POST" action="/api/auth/logout" style="margin:0;" id="logoutForm">
+            <button type="submit" class="btn" title="Lock Portal">Lock</button>
+          </form>
+        </div>
       </div>
     </div>
 
-    <button type="button" class="btn mobile-filters-toggle" id="mobileFiltersToggle" aria-expanded="false" aria-controls="contextControls" onclick="toggleMobileFilters()">Filters &amp; tools</button>
-    <div class="context-controls" id="contextControls">
-      <!-- Environment Selector -->
-      <div class="segmented" id="envSelector">
-        <button data-env="production"><span class="env-dot prod"></span>PRODUCTION</button>
-        <button data-env="staging"><span class="env-dot staging"></span>STAGING</button>
-        <button data-env="demo" class="active"><span class="env-dot local"></span>🧪 DEMO</button>
+    <div class="topbar-row topbar-filters scroll-fade" id="contextControls">
+      <!-- Time Window: 24 hours on every load (owner, 2026-10-29) -->
+      <div class="segmented" id="windowSelector" role="group" aria-label="Time window">
+        <button data-window="24" class="active">24h</button>
+        <button data-window="168">7d</button>
+        <button data-window="720">30d</button>
+        <button data-window="2160">90d</button>
       </div>
 
       <!-- Platform Selector -->
-      <div class="segmented" id="platformSelector">
-        <button data-platform="all" class="active">All Platforms</button>
+      <div class="segmented" id="platformSelector" role="group" aria-label="Platform">
+        <button data-platform="all" class="active">All</button>
         <button data-platform="ios">iOS</button>
         <button data-platform="android">Android</button>
         <button data-platform="backend">Backend</button>
@@ -901,63 +1099,30 @@
       <select aria-label="App version" class="filter-select" id="versionSelect" title="Filter Version">
         <option value="all">All Versions</option>
       </select>
-
-      <!-- Compare Version Filter -->
-      <select aria-label="Compare version" class="filter-select" id="compareVersionSelect" title="Compare Against Version">
-        <option value="all">Compare: Auto (Prev)</option>
-      </select>
-
-      <!-- Time Window Filter -->
-      <select aria-label="Time window" class="filter-select" id="windowSelect">
-        <option value="24">Last 24 Hours</option>
-        <option value="168">Last 7 Days</option>
-        <option value="720" selected>Last 30 Days</option>
-        <option value="2160">Last 90 Days</option>
-      </select>
-
-      <!-- Sync Remote Supabase Button -->
-      <button class="btn" id="syncBtn" onclick="syncSupabaseNow()" title="Pull latest telemetry from Supabase (cortex schema)">
-        ⟳ Sync Supabase
-      </button>
-
-      <!-- Edge Gate Mode / Auth Button -->
-      <button class="btn" id="edgeGateBtn" onclick="openEdgeGateDrawer()" title="Connect directly to Supabase Edge Gate (worldwide PWA mode)">
-        🔑 Edge Gate
-      </button>
-
-      <!-- Table Timeline Button (MIN-208) -->
-      <button class="btn" id="tableTimelineBtn" onclick="openTableTimeline()" title="One table's story: the apps' events beside the server's records">
-        Table Timeline
-      </button>
-
-      <!-- Live Tail Stream Button -->
-      <button class="btn" id="liveStreamBtn" onclick="openLiveStreamDrawer()">
-        <span class="env-dot local"></span> Live Stream
-      </button>
-
-      <!-- Lock Portal Button -->
-      <form method="POST" action="/api/auth/logout" style="margin:0;" id="logoutForm">
-        <button type="submit" class="btn" title="Lock Portal">Lock</button>
-      </form>
     </div>
+
+    <!-- Seven tabs -->
+    <nav class="nav-tabs scroll-fade" id="navTabs" aria-label="Cortex sections">
+      <button class="nav-tab active" data-tab="pulse" title="Release health and who is playing" aria-current="page">Pulse</button>
+      <button class="nav-tab" data-tab="players" title="New players, the journey and what players use">Players</button>
+      <button class="nav-tab" data-tab="games" title="Hands, modes, matchmaking and leaving">Games</button>
+      <button class="nav-tab" data-tab="economy" title="The store and the chip economy">Economy</button>
+      <button class="nav-tab" data-tab="triage" title="Crashes and errors">Triage <span class="tab-badge" id="triageBadge">0</span></button>
+      <button class="nav-tab" data-tab="vitals" title="Latency and realtime">Vitals</button>
+      <button class="nav-tab" data-tab="inbox" title="Shake bug reports">Inbox <span class="tab-badge" id="inboxBadge">0</span></button>
+    </nav>
   </header>
 
-  <!-- 5 High-Signal Navigation Tabs -->
-  <nav class="nav-tabs" id="navTabs" aria-label="Cortex sections">
-    <button class="nav-tab active" data-tab="pulse" aria-label="Pulse · Release & Health" aria-current="page"><span class="nav-full">1. Pulse · Release & Health</span><span class="nav-short" aria-hidden="true">Pulse</span></button>
-    <button class="nav-tab" data-tab="radar" aria-label="Radar · Product & User Analytics"><span class="nav-full">2. Radar · Product & User Analytics</span><span class="nav-short" aria-hidden="true">Radar</span></button>
-    <button class="nav-tab" data-tab="triage" aria-label="Triage · Crashes & Errors"><span class="nav-full">3. Triage · Crashes & Errors</span><span class="nav-short" aria-hidden="true">Triage</span> <span class="tab-badge" id="triageBadge">0</span></button>
-    <button class="nav-tab" data-tab="vitals" aria-label="Vitals · Latency & Realtime"><span class="nav-full">4. Vitals · Latency & Realtime</span><span class="nav-short" aria-hidden="true">Vitals</span></button>
-    <button class="nav-tab" data-tab="inbox" aria-label="Inbox · Shake Bug Reports"><span class="nav-full">5. Inbox · Shake Bug Reports</span><span class="nav-short" aria-hidden="true">Inbox</span> <span class="tab-badge" id="inboxBadge">0</span></button>
-  </nav>
+  <!-- Pull down to refresh -->
+  <div class="pull-indicator" id="pullIndicator" aria-hidden="true"><span class="refresh-icon">↓</span><span id="pullIndicatorText">Pull to refresh</span></div>
+
+  <div class="portal-toast" id="portalToast" role="status" hidden></div>
+
+  <!-- One tooltip for every chart mark ([data-tip]) -->
+  <div class="chart-tip" id="chartTip" role="tooltip" hidden></div>
 
   <!-- Main Content -->
   <main class="container">
-    <div class="env-banner" id="envBanner">
-      <span id="envBannerText">Viewing PRODUCTION environment · All Platforms</span>
-      <span id="envBannerMode" style="opacity: 0.85;">100% First-Party Telemetry · Zero Third-Party SDKs</span>
-    </div>
-
     <div id="viewRoot">Loading Cortex telemetry...</div>
   </main>
 
@@ -1022,8 +1187,12 @@
       platform: 'all',
       appVersion: 'all',
       compareVersion: 'all',
-      windowHours: 720,
+      versions: [],
+      windowHours: 24, // every load starts on the last 24 hours (owner, 2026-10-29)
       activeTab: 'pulse',
+      renderSeq: 0,
+      refreshing: false,
+      lastRefreshedAt: 0,
       radarMapMode: 'reach',
       liveStreamTimer: null,
       liveStreamPaused: false,
@@ -1087,7 +1256,8 @@
           ? (i % 13 === 6 ? 'testflight' : 'app_store')
           : (i % 17 === 6 ? 'test_lab' : i % 31 === 9 ? 'sideload' : 'play');
         const session_id = `sess-demo-${i + 1}`;
-        const minsAgo = Math.floor((i / totalDemoSessions) * 14 * 24 * 60) + 4;
+        // Denser near now, so the 24-hour view has a day of play to show
+        const minsAgo = Math.floor(Math.pow(i / totalDemoSessions, 1.5) * 14 * 24 * 60) + 4;
         const started_at = isoAgo(minsAgo);
         const isCrashed = (app_version === '2.0.1' && (i === 115 || i === 128)) || (app_version === '2.0.2' && i === 19);
         const hasError = isCrashed || i % 18 === 0;
@@ -1120,7 +1290,7 @@
           created_at: started_at,
         });
 
-        const pushEv = (name, properties) => {
+        const pushEv = (name, properties, at = started_at) => {
           product_events.push({
             session_id,
             environment: 'demo',
@@ -1132,8 +1302,8 @@
             install_channel,
             name,
             properties,
-            event_ts: started_at,
-            created_at: started_at,
+            event_ts: at,
+            created_at: at,
           });
         };
 
@@ -1188,6 +1358,9 @@
                 pushEv('scene.viewed', { scene: mode === 'casual' ? 'casualGame' : 'rankedGame' });
                 const handsPlayed = 4 + (i % 9);
                 const reason = i % 11 === 0 ? 'busted_chips' : i % 17 === 0 ? 'timeout_kicked' : i % 23 === 0 ? 'disconnected' : 'voluntary';
+                for (let h = 1; h <= handsPlayed; h++) {
+                  pushEv('hand.completed', { mode, handNumber: h }, isoAgo(Math.max(1, minsAgo - h * 2)));
+                }
                 pushEv('table.left', { mode, reason, handsPlayed });
                 if (i % 9 === 0) pushEv('turn.timeout', { mode });
                 if (i % 16 === 0) {
@@ -1493,13 +1666,16 @@
     // test channel, a debug build, or a bot, team or test account, before any count is taken.
     function getDemoSnapshotView() {
       const snap = getOrBuildDemoSnapshot();
+      const cutoff = state.windowHours > 0 ? Date.now() - state.windowHours * 3600 * 1000 : null;
+      const inWindow = (rows, column) => cutoff == null ? (rows || []) : (rows || []).filter(r => Date.parse(r[column]) >= cutoff);
       const isTestRow = (r, playerOnly) => HIDDEN_TRAFFIC_CLASSES.includes(r.traffic_class) ||
         (!playerOnly && (TEST_INSTALL_CHANNELS.includes(r.install_channel) || r.build_type === 'debug'));
       const keep = (rows, playerOnly = false) => (rows || [])
         .map(r => ({ ...r, traffic_class: demoTrafficClass(snap, r.user_id) }))
         .filter(r => state.includeTest || !isTestRow(r, playerOnly));
-      const sessions = keep(snap.sessions);
-      const error_events = keep(snap.error_events);
+      const windowSessions = inWindow(snap.sessions, 'started_at');
+      const sessions = keep(windowSessions);
+      const error_events = keep(inWindow(snap.error_events, 'created_at'));
       const issues = snap.issues.map(iss => {
         const events = error_events.filter(e => Number(e.issue_id) === Number(iss.id));
         return {
@@ -1513,10 +1689,11 @@
         sessions,
         error_events,
         issues,
-        product_events: keep(snap.product_events),
+        product_events: keep(inWindow(snap.product_events, 'event_ts')),
+        performance_spans: inWindow(snap.performance_spans, 'created_at'),
         bug_reports: keep(snap.bug_reports, true),
         new_players: (snap.new_players || []).filter(r => state.includeTest || !HIDDEN_TRAFFIC_CLASSES.includes(r.traffic_class)),
-        test_traffic: { included: state.includeTest, hidden_sessions: snap.sessions.length - sessions.length },
+        test_traffic: { included: state.includeTest, hidden_sessions: windowSessions.length - sessions.length },
       };
     }
 
@@ -1548,7 +1725,7 @@
       state.edgeSnapCache = null;
       state.edgeLastError = null;
       syncEnvButtonsUI();
-      updateBanner();
+      updateHeader();
       const keyInput = document.getElementById('inlineOwnerKeyInput');
       if (keyInput && keyInput.value.trim()) {
         state.ownerKey = keyInput.value.trim();
@@ -1641,6 +1818,7 @@
         }
         state.demoKeyVerified = true;
         state.edgeLastError = null;
+        state.lastRefreshedAt = Date.now();
         state.edgeSnapCache = body.snapshot || {
           sessions: [],
           issues: [],
@@ -1663,10 +1841,11 @@
             });
             if (fallbackRes.ok) {
               const fbBody = await fallbackRes.json().catch(() => ({}));
+              state.lastRefreshedAt = Date.now();
               state.environment = 'staging';
               localStorage.setItem('cortex_active_env_v2', 'staging');
               syncEnvButtonsUI();
-              updateBanner();
+              updateHeader();
               state.demoKeyVerified = true;
               state.edgeLastError = null;
               state.edgeSnapCache = fbBody.snapshot || {
@@ -1960,6 +2139,296 @@
         st.waitSamples++;
       }
       return stats;
+    }
+
+    // Embedded from server/charts.js; charts.test.ts enforces parity.
+    const CHART_COLORS = {
+      ios: '#3987e5', android: '#199e70', other: '#71717a',
+      casual: '#3987e5', ranked: '#d95926', tourney: '#199e70',
+      accent: '#3987e5', good: '#0ca30c', warning: '#fab219', serious: '#ec835a', critical: '#d03b3b',
+    };
+
+    // The categorical slots in their validated order, for entities without a fixed colour above.
+    // Assign them in a fixed order of the entities (never by rank); past eight, fold into "Other".
+    const CHART_SERIES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
+
+    function chartEscape(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+    }
+
+    function chartTrim(value) {
+      return value.toFixed(1).replace(/\.0$/, '');
+    }
+
+    // 1,284 as "1.3K"; under a thousand as written (one decimal at most).
+    function chartCompact(n) {
+      const v = Number(n) || 0;
+      const a = Math.abs(v);
+      if (a >= 1e9) return `${chartTrim(v / 1e9)}B`;
+      if (a >= 1e6) return `${chartTrim(v / 1e6)}M`;
+      if (a >= 1e3) return `${chartTrim(v / 1e3)}K`;
+      return String(Math.round(v * 10) / 10);
+    }
+
+    // 3725 seconds as "1h 2m"; 252 as "4m 12s"; 45 as "45s".
+    function chartDuration(seconds) {
+      const s = Math.max(0, Math.round(Number(seconds) || 0));
+      if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+      if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
+      return `${s}s`;
+    }
+
+    // The smallest of 1, 2, 2.5, 5 and 10 times a power of ten at or above max (1 for nothing).
+    function chartNiceMax(max) {
+      if (!(max > 0)) return 1;
+      const exp = Math.pow(10, Math.floor(Math.log10(max)));
+      for (const m of [1, 2, 2.5, 5, 10]) {
+        if (m * exp >= max - 1e-9) return m * exp;
+      }
+      return 10 * exp;
+    }
+
+    // The axis values for a top: 0, the middle and the top; counts never get a fractional middle.
+    function chartTicks(top, integer = true) {
+      const middle = top / 2;
+      return integer && !Number.isInteger(middle) ? [0, top] : [0, middle, top];
+    }
+
+    // The window as buckets in the viewer's time zone, oldest first: hours for a window of two days or
+    // less, else days. One bucket more than the window holds, so the partial first hour or day keeps
+    // the rows the window reaches into it, and the last bucket holds now.
+    function chartTimeBuckets(windowHours, nowMs = Date.now()) {
+      const hours = Math.max(1, Math.round(Number(windowHours) || 24));
+      const starts = [];
+      if (hours <= 48) {
+        const top = new Date(nowMs);
+        top.setMinutes(0, 0, 0);
+        for (let i = hours; i >= 0; i--) starts.push(top.getTime() - i * 3600000);
+        return { unit: 'hour', starts, end: top.getTime() + 3600000 };
+      }
+      const days = Math.ceil(hours / 24);
+      const today = new Date(nowMs);
+      today.setHours(0, 0, 0, 0);
+      for (let i = days; i >= 0; i--) {
+        const day = new Date(today);
+        day.setDate(day.getDate() - i);
+        starts.push(day.getTime());
+      }
+      const end = new Date(today);
+      end.setDate(end.getDate() + 1);
+      return { unit: 'day', starts, end: end.getTime() };
+    }
+
+    // The bucket holding a time, or -1 outside the buckets.
+    function chartBucketIndex(buckets, ms) {
+      if (!Number.isFinite(ms) || ms < buckets.starts[0] || ms >= buckets.end) return -1;
+      for (let i = buckets.starts.length - 1; i >= 0; i--) {
+        if (ms >= buckets.starts[i]) return i;
+      }
+      return -1;
+    }
+
+    function chartBucketLabel(buckets, i) {
+      const date = new Date(buckets.starts[i]);
+      return buckets.unit === 'hour'
+        ? date.toLocaleTimeString(undefined, { hour: 'numeric' })
+        : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    // A bucket's name in a tooltip: "Thu 2 PM" for an hour, "Thu, Oct 29" for a day.
+    function chartBucketTitle(buckets, i) {
+      const date = new Date(buckets.starts[i]);
+      return buckets.unit === 'hour'
+        ? `${date.toLocaleDateString(undefined, { weekday: 'short' })} ${date.toLocaleTimeString(undefined, { hour: 'numeric' })}`
+        : date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    function chartProps(row) {
+      if (row.properties && typeof row.properties === 'object') return row.properties;
+      try {
+        const parsed = JSON.parse(row.properties_json || '{}');
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    // Active players per bucket by platform (a player counts once per bucket and platform; players
+    // counts them once across platforms), and per bucket the sessions started, the crashed ones and
+    // their summed length, from session rows (started_at). The buckets travel with the series.
+    function chartActivitySeries(sessions, buckets) {
+      const n = buckets.starts.length;
+      const sets = { ios: [], android: [], other: [], players: [] };
+      for (const key of Object.keys(sets)) sets[key] = Array.from({ length: n }, () => new Set());
+      const started = new Array(n).fill(0);
+      const crashed = new Array(n).fill(0);
+      const durationMs = new Array(n).fill(0);
+      for (const s of sessions || []) {
+        const i = chartBucketIndex(buckets, Date.parse(s.started_at));
+        if (i < 0) continue;
+        started[i]++;
+        if (s.status === 'crashed') crashed[i]++;
+        durationMs[i] += Number(s.duration_ms) || 0;
+        const key = s.platform === 'ios' || s.platform === 'android' ? s.platform : 'other';
+        const player = s.user_id || s.install_id || s.session_id;
+        sets[key][i].add(player);
+        sets.players[i].add(player);
+      }
+      const sizes = (list) => list.map((set) => set.size);
+      return {
+        buckets,
+        ios: sizes(sets.ios),
+        android: sizes(sets.android),
+        other: sizes(sets.other),
+        players: sizes(sets.players),
+        sessions: started,
+        crashed,
+        durationMs,
+      };
+    }
+
+    // Hands completed per bucket and mode, from hand.completed product events (event_ts, mode).
+    function chartHandSeries(events, buckets) {
+      const n = buckets.starts.length;
+      const out = { casual: new Array(n).fill(0), ranked: new Array(n).fill(0), tourney: new Array(n).fill(0) };
+      for (const e of events || []) {
+        if (e.name !== 'hand.completed') continue;
+        const i = chartBucketIndex(buckets, Date.parse(e.event_ts || e.created_at));
+        if (i < 0) continue;
+        const raw = String(chartProps(e).mode || 'casual').toLowerCase();
+        const mode = raw === 'tournament' ? 'tourney' : out[raw] ? raw : 'casual';
+        out[mode][i]++;
+      }
+      return { buckets, ...out };
+    }
+
+    function chartLegend(series) {
+      if (!series || series.length < 2) return '';
+      return `<div class="chart-legend">${series.map((s) => `<span class="chart-key"><i style="background:${chartEscape(s.color)}"></i>${chartEscape(s.label)}</span>`).join('')}</div>`;
+    }
+
+    // The same numbers as a table, behind "Show numbers" (a chart's exact values without hovering).
+    function chartDataTable(headers, rows) {
+      return `<details class="chart-data"><summary>Show numbers</summary><div class="table-scroll"><table>
+        <thead><tr>${headers.map((h) => `<th>${chartEscape(h)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${chartEscape(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div></details>`;
+    }
+
+    // Columns over time, stacked by series (series[0] at the bottom). Each column is one hit target
+    // whose tooltip lists every series in that bucket. A window with nothing draws the empty state.
+    function chartColumns({ buckets, series, height = 160, emptyText = 'Nothing in this window', unitLabel = '' }) {
+      const n = buckets.starts.length;
+      const totals = Array.from({ length: n }, (_, i) => series.reduce((a, s) => a + (Number(s.values[i]) || 0), 0));
+      const max = Math.max(0, ...totals);
+      if (max === 0) return `<div class="chart-empty" style="height:${height}px">${chartEscape(emptyText)}</div>`;
+      const top = chartNiceMax(max);
+      const labelEvery = Math.max(1, Math.ceil(n / 6));
+      const grid = chartTicks(top).map((t) => `<div class="chart-gridline" style="bottom:${(t / top) * 100}%"><span>${chartEscape(chartCompact(t))}</span></div>`).join('');
+      const cols = totals.map((total, i) => {
+        const rows = series.length > 1
+          ? series.map((s) => `${Number(s.values[i]) || 0} ${s.label}`).concat(`${total} total`)
+          : [`${total}${unitLabel ? ` ${unitLabel}` : ''}`];
+        const tip = [chartBucketTitle(buckets, i), ...rows].join('\n');
+        const segs = series.slice().reverse()
+          .filter((s) => Number(s.values[i]) > 0)
+          .map((s) => `<span class="chart-seg" style="flex-grow:${Number(s.values[i])};background:${chartEscape(s.color)}"></span>`).join('');
+        return `<div class="chart-col" tabindex="0" data-tip="${chartEscape(tip)}"><div class="chart-stack" style="height:${(total / top) * 100}%">${segs}</div></div>`;
+      }).join('');
+      const labels = buckets.starts.map((_, i) => (i % labelEvery === (n - 1) % labelEvery
+        ? `<span style="left:${((i + 0.5) / n) * 100}%">${chartEscape(chartBucketLabel(buckets, i))}</span>`
+        : '')).join('');
+      return `<div class="chart chart-columns">
+        <div class="chart-plot" style="height:${height}px"><div class="chart-grid">${grid}</div><div class="chart-cols">${cols}</div></div>
+        <div class="chart-xlabels">${labels}</div>
+      </div>`;
+    }
+
+    // Horizontal bars, one row per item: the label and its value above a track. Values share one scale
+    // (max, else the largest). item: { label, value, valueText?, sub?, color?, tip? }.
+    function chartHBars(items, { max, emptyText = 'Nothing in this window' } = {}) {
+      const list = items || [];
+      if (list.length === 0) return `<div class="chart-empty" style="height:80px">${chartEscape(emptyText)}</div>`;
+      const top = max > 0 ? max : Math.max(0, ...list.map((it) => Number(it.value) || 0));
+      return `<div class="chart-hbars">${list.map((it) => {
+        const pct = top > 0 ? Math.min(100, ((Number(it.value) || 0) / top) * 100) : 0;
+        const tip = it.tip || `${it.label}\n${it.valueText ?? it.value}`;
+        return `<div class="hbar" tabindex="0" data-tip="${chartEscape(tip)}">
+          <div class="hbar-head"><span class="hbar-label">${chartEscape(it.label)}</span><span class="hbar-value">${chartEscape(it.valueText ?? chartCompact(it.value))}</span></div>
+          <div class="hbar-track"><div class="hbar-fill" style="width:${pct}%;background:${chartEscape(it.color || CHART_COLORS.accent)}"></div></div>
+          ${it.sub ? `<div class="hbar-sub">${chartEscape(it.sub)}</div>` : ''}
+        </div>`;
+      }).join('')}</div>`;
+    }
+
+    // A funnel: each step's players as a bar against the first step, with its drop from the step before.
+    function chartFunnel(steps) {
+      const list = steps || [];
+      const first = Math.max(0, Number(list[0]?.users) || 0);
+      if (first === 0) return `<div class="chart-empty" style="height:80px">No players in this window</div>`;
+      return chartHBars(list.map((s, i) => ({
+        label: s.step,
+        value: Number(s.users) || 0,
+        valueText: `${s.users} · ${s.conversionFromStartPct}%`,
+        sub: i > 0 && s.dropOffFromPrevPct > 0 ? `−${s.dropOffFromPrevPct}% from the step before` : '',
+        color: CHART_COLORS.accent,
+        tip: `${s.step}\n${s.users} players\n${s.conversionFromStartPct}% of the first step${i > 0 ? `\n−${s.dropOffFromPrevPct}% from the step before` : ''}`,
+      })), { max: first });
+    }
+
+    // One bar of shares (2px gaps between parts) with a legend that names each part, its count and share.
+    // part: { label, value, color }.
+    function chartShareBar(parts, { emptyText = 'Nothing in this window' } = {}) {
+      const list = (parts || []).filter((p) => Number(p.value) > 0);
+      const total = list.reduce((a, p) => a + Number(p.value), 0);
+      if (total === 0) return `<div class="chart-empty" style="height:60px">${chartEscape(emptyText)}</div>`;
+      const pct = (v) => Math.round((v / total) * 1000) / 10;
+      const segs = list.map((p) => `<span class="share-seg" tabindex="0" style="flex-grow:${Number(p.value)};background:${chartEscape(p.color)}" data-tip="${chartEscape(`${p.label}\n${p.value} · ${pct(Number(p.value))}%`)}"></span>`).join('');
+      const legend = list.map((p) => `<span class="chart-key"><i style="background:${chartEscape(p.color)}"></i>${chartEscape(p.label)} <strong>${chartEscape(chartCompact(p.value))}</strong> <em>${pct(Number(p.value))}%</em></span>`).join('');
+      return `<div class="chart-share"><div class="share-bar">${segs}</div><div class="chart-legend">${legend}</div></div>`;
+    }
+
+    // Latency ranges on one log scale: a bar from p50 to p95, a dot at p50 and a tick at p99.
+    // row: { label, p50Ms, p95Ms, p99Ms, count, errorRatePct }.
+    function chartRanges(rows) {
+      const list = (rows || []).filter((r) => Number(r.count) > 0);
+      if (list.length === 0) return `<div class="chart-empty" style="height:80px">No timings in this window</div>`;
+      const maxMs = Math.max(10, ...list.map((r) => Number(r.p99Ms) || Number(r.p95Ms) || 0));
+      const top = Math.pow(10, Math.ceil(Math.log10(maxMs)));
+      const floor = 10;
+      const pos = (ms) => Math.max(0, Math.min(100, ((Math.log10(Math.max(floor, ms)) - 1) / (Math.log10(top) - 1)) * 100));
+      const fmt = (ms) => (ms >= 1000 ? `${chartTrim(ms / 1000)} s` : `${Math.round(ms)} ms`);
+      const ticks = [];
+      for (let t = floor; t <= top; t *= 10) ticks.push(t);
+      return `<div class="chart-ranges">
+        ${list.map((r) => {
+          const p50 = Number(r.p50Ms) || 0;
+          const p95 = Number(r.p95Ms) || 0;
+          const p99 = Number(r.p99Ms) || 0;
+          const tip = `${r.label}\np50 ${fmt(p50)} · p95 ${fmt(p95)} · p99 ${fmt(p99)}\n${r.count} samples · ${r.errorRatePct}% failed`;
+          return `<div class="range-row" tabindex="0" data-tip="${chartEscape(tip)}">
+            <div class="hbar-head"><span class="hbar-label mono">${chartEscape(r.label)}</span><span class="hbar-value">${chartEscape(fmt(p50))} · ${chartEscape(fmt(p95))}${Number(r.errorRatePct) > 0 ? ` · ${chartEscape(r.errorRatePct)}% failed` : ''}</span></div>
+            <div class="range-track">
+              <span class="range-span" style="left:${pos(p50)}%;width:${Math.max(0.6, pos(p95) - pos(p50))}%"></span>
+              <span class="range-p99" style="left:${pos(p99)}%"></span>
+              <span class="range-dot" style="left:${pos(p50)}%"></span>
+            </div>
+          </div>`;
+        }).join('')}
+        <div class="range-axis">${ticks.map((t) => `<span style="left:${pos(t)}%">${chartEscape(fmt(t))}</span>`).join('')}</div>
+      </div>`;
+    }
+
+    // A small trend line for a headline card; nothing for fewer than two points or all zeros.
+    function chartSparkline(values, color = CHART_COLORS.accent) {
+      const list = (values || []).map((v) => Number(v) || 0);
+      const max = Math.max(0, ...list);
+      if (list.length < 2 || max === 0) return '';
+      const pts = list.map((v, i) => `${((i / (list.length - 1)) * 100).toFixed(2)},${(22 - (v / max) * 20).toFixed(2)}`);
+      return `<svg class="chart-spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
+        <polygon points="0,24 ${pts.join(' ')} 100,24" fill="${chartEscape(color)}" fill-opacity="0.1"></polygon>
+        <polyline points="${pts.join(' ')}" fill="none" stroke="${chartEscape(color)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+      </svg>`;
     }
 
     function computeRadarFromSnapshot(snap) {
@@ -2342,7 +2811,7 @@
           </div>
 
           <label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">CORTEX_OWNER_KEY (Stored locally on this device)</label>
-          <input id="drawerOwnerKeyInput" type="password" value="${escapeHtml(state.ownerKey)}" placeholder="Enter CORTEX_OWNER_KEY..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:#080c14;color:var(--text);font-size:13px;margin-bottom:14px;" />
+          <input id="drawerOwnerKeyInput" type="password" value="${escapeHtml(state.ownerKey)}" placeholder="Enter CORTEX_OWNER_KEY..." style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;margin-bottom:14px;" />
 
           <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:14px;">
             <strong>Configured Edge Gate Endpoints:</strong><br/>
@@ -2415,26 +2884,57 @@
       select.innerHTML = `<option value="all">All Versions</option>` +
         versions.map(v => `<option value="${escapeHtml(v)}" ${v === prev ? 'selected' : ''}>v${escapeHtml(v)}</option>`).join('');
 
-      const compSelect = document.getElementById('compareVersionSelect');
-      const prevComp = state.compareVersion;
-      compSelect.innerHTML = `<option value="all">Compare: Auto (Prev)</option>` +
-        versions.map(v => `<option value="${escapeHtml(v)}" ${v === prevComp ? 'selected' : ''}>vs v${escapeHtml(v)}</option>`).join('');
+      state.versions = versions;
     }
 
-    function updateBanner() {
+    function updateHeader() {
       document.body.setAttribute('data-env', state.environment === 'demo' ? 'local' : state.environment);
-      const platLabel = state.platform === 'all' ? 'All Platforms (iOS + Android + Backend)' : state.platform.toUpperCase();
-      const verLabel = state.appVersion === 'all' ? 'All Versions' : `v${state.appVersion}`;
-      const envLabel = state.environment === 'demo' ? '🧪 DEMO (INTERACTIVE SAMPLE DATA)' : state.environment.toUpperCase();
-      const modeBadge = state.environment === 'demo'
-        ? '🧪 Sample Telemetry · Switch to STAGING or PRODUCTION above for live data'
-        : state.dataSource === 'edge'
-          ? '⚡ Supabase Edge Gate (Serverless PWA)'
-          : '🖥️ Local SQLite Server';
-      document.getElementById('envBannerText').textContent =
-        `Active Environment: ${envLabel} · ${platLabel} · ${verLabel}`;
-      const modeEl = document.getElementById('envBannerMode');
-      if (modeEl) modeEl.textContent = modeBadge;
+      document.querySelectorAll('#windowSelector button').forEach(b => {
+        b.classList.toggle('active', Number(b.getAttribute('data-window')) === state.windowHours);
+      });
+      updateRefreshLabel();
+    }
+
+    function windowLabel() {
+      return { 24: 'last 24 hours', 168: 'last 7 days', 720: 'last 30 days', 2160: 'last 90 days' }[state.windowHours] || `last ${state.windowHours} hours`;
+    }
+
+    function refreshedAgo() {
+      if (!state.lastRefreshedAt) return 'Refresh';
+      const mins = Math.floor((Date.now() - state.lastRefreshedAt) / 60000);
+      if (mins < 1) return 'Updated just now';
+      if (mins < 60) return `Updated ${mins} min ago`;
+      const hours = Math.floor(mins / 60);
+      return `Updated ${hours} h ago`;
+    }
+
+    // The refresh button's state: loading (the arrow turns), error (the reason in its tooltip), or
+    // when the data last landed.
+    function setRefreshState(kind, detail = '') {
+      const btn = document.getElementById('syncBtn');
+      btn.classList.toggle('loading', kind === 'loading');
+      btn.classList.toggle('error', kind === 'error');
+      btn.dataset.state = kind;
+      btn.title = detail || 'Refresh from Supabase (or pull down on the page)';
+      updateRefreshLabel();
+    }
+
+    function updateRefreshLabel() {
+      const btn = document.getElementById('syncBtn');
+      const label = document.getElementById('refreshStatus');
+      if (!btn || !label) return;
+      const kind = btn.dataset.state;
+      label.textContent = kind === 'loading' ? 'Refreshing…' : kind === 'error' ? 'Refresh failed' : refreshedAgo();
+    }
+
+    let toastTimer = null;
+    function showToast(text, kind = 'info') {
+      const el = document.getElementById('portalToast');
+      el.textContent = text;
+      el.classList.toggle('error', kind === 'error');
+      el.hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { el.hidden = true; }, kind === 'error' ? 7000 : 4000);
     }
 
     function switchTab(tabName) {
@@ -2442,11 +2942,13 @@
       document.querySelectorAll('#navTabs .nav-tab').forEach(t => {
         const active = t.getAttribute('data-tab') === tabName;
         t.classList.toggle('active', active);
-        if (active) t.setAttribute('aria-current', 'page');
-        else t.removeAttribute('aria-current');
+        if (active) {
+          t.setAttribute('aria-current', 'page');
+          t.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        } else t.removeAttribute('aria-current');
       });
       refreshActiveTab();
-      if (window.matchMedia('(max-width: 768px)').matches) window.scrollTo({ top: 0, behavior: 'instant' });
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
 
     function handleActionChipClick(targetTab, targetId) {
@@ -2457,161 +2959,241 @@
       }
     }
 
-    async function refreshActiveTab() {
-      updateBanner();
-      const root = document.getElementById('viewRoot');
+    const TAB_ENDPOINTS = { pulse: 'pulse', players: 'radar', games: 'radar', economy: 'radar', triage: 'triage', vitals: 'vitals', inbox: 'inbox' };
+    const TAB_RENDERERS = {
+      pulse: (root, d) => renderPulse(root, d),
+      players: (root, d) => renderPlayers(root, d),
+      games: (root, d) => renderGames(root, d),
+      economy: (root, d) => renderEconomy(root, d),
+      triage: (root, d) => renderTriage(root, d),
+      vitals: (root, d) => renderVitals(root, d),
+      inbox: (root, d) => renderInbox(root, d),
+    };
 
-      if (state.dataSource === 'edge' || state.environment === 'demo') {
-        const snap = await fetchEdgeSnapshot();
-        if (!snap) {
-          setPortalUnlocked(false);
+    // Renders the active tab. A refresh keeps the frame: the last render stays, dimmed, until the
+    // new one lands; a later call wins over an earlier one that answers after it.
+    async function refreshActiveTab() {
+      updateHeader();
+      const root = document.getElementById('viewRoot');
+      const seq = ++state.renderSeq;
+      const tab = TAB_ENDPOINTS[state.activeTab] ? state.activeTab : 'pulse';
+      const current = () => seq === state.renderSeq;
+      root.classList.add('refreshing');
+      try {
+        if (state.dataSource === 'edge' || state.environment === 'demo') {
+          const snap = await fetchEdgeSnapshot();
+          if (!current()) return;
+          if (!snap) {
+            setPortalUnlocked(false);
+            return;
+          }
+          setPortalUnlocked(true);
+          const allErrs = filterRowsByState(snap.error_events, false);
+          const triageUsersByIssue = new Map();
+          for (const err of allErrs) {
+            const iid = Number(err.issue_id);
+            if (!iid) continue;
+            if (!triageUsersByIssue.has(iid)) triageUsersByIssue.set(iid, new Set());
+            triageUsersByIssue.get(iid).add(err.user_id || err.install_id || err.session_id || err.id);
+          }
+          const issues = filterRowsByState(snap.issues, false).map(iss => ({
+            ...iss,
+            affected_users_count: Number(iss.affected_users_count) || triageUsersByIssue.get(Number(iss.id))?.size || 1,
+          }));
+          const reports = filterRowsByState(snap.bug_reports, false).map(r => {
+            const b64 = r.screenshot_base64 ? String(r.screenshot_base64) : null;
+            const mime = b64 && b64.startsWith('/9j/') ? 'image/jpeg' : 'image/png';
+            return {
+              ...r,
+              screenshot_base64: b64 && !b64.startsWith('data:image/')
+                ? `data:${mime};base64,${b64}`
+                : b64,
+            };
+          });
+          document.getElementById('triageBadge').textContent = String(issues.filter(i => i.status !== 'resolved').length);
+          document.getElementById('inboxBadge').textContent = String(reports.filter(r => r.status === 'open').length);
+
+          // The same series the local server adds (server/charts.js), over the window's buckets
+          const buckets = chartTimeBuckets(state.windowHours);
+          let data;
+          if (tab === 'pulse') data = { ...computePulseFromSnapshot(snap), activity: chartActivitySeries(filterRowsByState(snap.sessions), buckets) };
+          else if (TAB_ENDPOINTS[tab] === 'radar') data = { ...computeRadarFromSnapshot(snap), handSeries: chartHandSeries(filterRowsByState(snap.product_events), buckets) };
+          else if (tab === 'triage') data = { issues };
+          else if (tab === 'vitals') data = computeVitalsFromSnapshot(snap);
+          else data = { reports };
+          TAB_RENDERERS[tab](root, data);
+          if (state.environment === 'demo' || !state.lastRefreshedAt) state.lastRefreshedAt = Date.now();
           return;
         }
-        setPortalUnlocked(true);
-        const allErrs = filterRowsByState(snap.error_events, false);
-        const triageUsersByIssue = new Map();
-        for (const err of allErrs) {
-          const iid = Number(err.issue_id);
-          if (!iid) continue;
-          if (!triageUsersByIssue.has(iid)) triageUsersByIssue.set(iid, new Set());
-          triageUsersByIssue.get(iid).add(err.user_id || err.install_id || err.session_id || err.id);
+
+        // Update badges in background
+        fetch(`/api/triage?${queryStr()}`).then(r => r.json()).then(d => {
+          const openCount = (d.issues || []).filter(i => i.status !== 'resolved').length;
+          document.getElementById('triageBadge').textContent = String(openCount);
+        }).catch(() => {});
+        fetch(`/api/inbox?${queryStr()}`).then(r => r.json()).then(d => {
+          const openCount = (d.reports || []).filter(i => i.status === 'open').length;
+          document.getElementById('inboxBadge').textContent = String(openCount);
+        }).catch(() => {});
+
+        const res = await fetch(`/api/${TAB_ENDPOINTS[tab]}?${queryStr()}`);
+        const data = await res.json();
+        if (!current()) return;
+        TAB_RENDERERS[tab](root, data);
+        state.lastRefreshedAt = Date.now();
+      } finally {
+        if (current()) {
+          root.classList.remove('refreshing');
+          updateRefreshLabel();
+          // The header is measured once it shows (it is hidden while the portal is locked)
+          document.querySelectorAll('.scroll-fade').forEach(updateScrollFade);
         }
-        const issues = filterRowsByState(snap.issues, false).map(iss => ({
-          ...iss,
-          affected_users_count: Number(iss.affected_users_count) || triageUsersByIssue.get(Number(iss.id))?.size || 1,
-        }));
-        const reports = filterRowsByState(snap.bug_reports, false).map(r => {
-          const b64 = r.screenshot_base64 ? String(r.screenshot_base64) : null;
-          const mime = b64 && b64.startsWith('/9j/') ? 'image/jpeg' : 'image/png';
-          return {
-            ...r,
-            screenshot_base64: b64 && !b64.startsWith('data:image/')
-              ? `data:${mime};base64,${b64}`
-              : b64,
-          };
-        });
-        document.getElementById('triageBadge').textContent = String(issues.filter(i => i.status !== 'resolved').length);
-        document.getElementById('inboxBadge').textContent = String(reports.filter(r => r.status === 'open').length);
-
-        if (state.activeTab === 'pulse') renderPulse(root, computePulseFromSnapshot(snap));
-        else if (state.activeTab === 'radar') renderRadar(root, computeRadarFromSnapshot(snap));
-        else if (state.activeTab === 'triage') renderTriage(root, { issues });
-        else if (state.activeTab === 'vitals') renderVitals(root, computeVitalsFromSnapshot(snap));
-        else if (state.activeTab === 'inbox') renderInbox(root, { reports });
-        return;
       }
+    }
 
-      // Update badges in background
-      fetch(`/api/triage?${queryStr()}`).then(r => r.json()).then(d => {
-        const openCount = (d.issues || []).filter(i => i.status !== 'resolved').length;
-        document.getElementById('triageBadge').textContent = String(openCount);
-      }).catch(() => {});
-      fetch(`/api/inbox?${queryStr()}`).then(r => r.json()).then(d => {
-        const openCount = (d.reports || []).filter(i => i.status === 'open').length;
-        document.getElementById('inboxBadge').textContent = String(openCount);
-      }).catch(() => {});
+    // A card: its title, the line under it, then the body (HTML). extra sits at the header's right.
+    function panelCard(title, subtitle, body, extra = '') {
+      return `
+        <div class="panel-card">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">${escapeHtml(title)}</div>
+              ${subtitle ? `<div class="panel-subtitle">${escapeHtml(subtitle)}</div>` : ''}
+            </div>
+            ${extra}
+          </div>
+          ${body}
+        </div>
+      `;
+    }
 
-      if (state.activeTab === 'pulse') {
-        const res = await fetch(`/api/pulse?${queryStr()}`);
-        const data = await res.json();
-        renderPulse(root, data);
-      } else if (state.activeTab === 'radar') {
-        const res = await fetch(`/api/radar?${queryStr()}`);
-        const data = await res.json();
-        renderRadar(root, data);
-      } else if (state.activeTab === 'triage') {
-        const res = await fetch(`/api/triage?${queryStr()}`);
-        const data = await res.json();
-        renderTriage(root, data);
-      } else if (state.activeTab === 'vitals') {
-        const res = await fetch(`/api/vitals?${queryStr()}`);
-        const data = await res.json();
-        renderVitals(root, data);
-      } else if (state.activeTab === 'inbox') {
-        const res = await fetch(`/api/inbox?${queryStr()}`);
-        const data = await res.json();
-        renderInbox(root, data);
-      }
+    // A headline number: a label (with a swatch when it names a series), the value, a line under it
+    // (HTML) and an optional trend line.
+    function statTile(tile) {
+      const { label, value, sub = '', spark = '', swatch = '' } = tile;
+      return `
+        <div class="kpi-card">
+          <div class="kpi-label">${swatch ? `<i class="key-swatch" style="background:${escapeHtml(swatch)}"></i>` : ''}${escapeHtml(label)}</div>
+          <div class="kpi-value">${escapeHtml(value)}</div>
+          ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
+          ${spark}
+        </div>
+      `;
+    }
+
+    // A status never rides on colour alone: a dot and its word.
+    function statusMark(kind, word) {
+      return `<span class="status-dot" style="background:${CHART_COLORS[kind] || CHART_COLORS.accent}"></span>${escapeHtml(word)}`;
+    }
+
+    function capitalize(text) {
+      const str = String(text || '');
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    function platformLabel(platform) {
+      return { ios: 'iOS', android: 'Android', backend: 'Backend' }[platform] || capitalize(platform || 'unknown');
+    }
+
+    // Rows of a time chart's "Show numbers" table, newest first.
+    function bucketRows(buckets, columns) {
+      return buckets.starts.map((_, i) => [chartBucketTitle(buckets, i), ...columns.map(values => values[i] ?? 0)]).reverse();
     }
 
     function renderPulse(root, data) {
       const s = data.summary;
       const briefing = data.briefing || { status: 'healthy', headline: 'All Systems Healthy', actionItems: [] };
       const comp = data.versionComparison;
-      const cfColor = s.crashFreeSessionsPct >= 99.5 ? 'var(--green)' : s.crashFreeSessionsPct >= 98 ? 'var(--amber)' : 'var(--red)';
       const statusDotColor = briefing.status === 'healthy' ? 'var(--green)' : briefing.status === 'warning' ? 'var(--amber)' : 'var(--red)';
+      const act = data.activity;
+      const per = act && act.buckets.unit === 'day' ? 'day' : 'hour';
+      const cf = s.crashFreeSessionsPct;
+      const cfMark = cf >= 99.5 ? statusMark('good', 'Healthy') : cf >= 98 ? statusMark('warning', 'Watch') : statusMark('critical', 'Needs attention');
+      const avgLength = act ? act.durationMs.map((ms, i) => (act.sessions[i] > 0 ? ms / act.sessions[i] : 0)) : [];
+      const hidden = data.testTraffic && !data.testTraffic.included
+        ? ` · <span id="testSessionsHidden">${data.testTraffic.hiddenSessions} test session${data.testTraffic.hiddenSessions === 1 ? '' : 's'} hidden</span>`
+        : '';
 
-      const compHtml = comp ? `
-        <div class="panel-card" style="border-color:rgba(56,189,248,0.35);">
-          <div class="panel-header" style="margin-bottom:12px;">
-            <div>
-              <div class="panel-title">Version-over-Version Comparison: <span style="color:var(--accent)">v${escapeHtml(comp.currentVersion)}</span> vs. <span style="color:var(--muted)">v${escapeHtml(comp.previousVersion)}</span></div>
-              <div class="panel-subtitle">Direct release health, session depth, and startup latency delta against baseline build</div>
-            </div>
+      const activitySeries = act ? [
+        { label: 'iOS', color: CHART_COLORS.ios, values: act.ios },
+        { label: 'Android', color: CHART_COLORS.android, values: act.android },
+        ...(act.other.some(v => v > 0) ? [{ label: 'Other', color: CHART_COLORS.other, values: act.other }] : []),
+      ] : [];
+      const activityBody = act ? `
+        ${chartColumns({ buckets: act.buckets, series: activitySeries, emptyText: `No players in the ${windowLabel()}` })}
+        ${chartLegend(activitySeries)}
+        ${chartDataTable(['When', ...activitySeries.map(x => x.label), 'Sessions'], bucketRows(act.buckets, [...activitySeries.map(x => x.values), act.sessions]))}
+      ` : `<div class="chart-empty" style="height:120px">This server does not send players over time yet.</div>`;
+
+      const versions = data.versionBreakdown || [];
+      const shownVersions = versions.slice(0, 8);
+      const versionPlatforms = Array.from(new Set(shownVersions.map(v => v.platform)));
+      const versionBody = `
+        ${chartHBars(shownVersions.map(v => ({
+          label: `v${v.appVersion} · ${platformLabel(v.platform)}`,
+          value: v.sessions,
+          valueText: `${v.adoptionPct}% · ${v.sessions} sessions`,
+          sub: `${v.crashFreePct}% crash-free · ${v.users} player${v.users === 1 ? '' : 's'} · ${v.totalErrors} error${v.totalErrors === 1 ? '' : 's'}`,
+          color: CHART_COLORS[v.platform] || CHART_COLORS.other,
+        })), { emptyText: 'No sessions for this filter' })}
+        ${chartLegend(versionPlatforms.map(p => ({ label: platformLabel(p), color: CHART_COLORS[p] || CHART_COLORS.other })))}
+        ${versions.length > shownVersions.length ? `<div class="kpi-sub" style="margin-top:10px;">${versions.length - shownVersions.length} older versions not shown</div>` : ''}
+      `;
+
+      const topIssues = data.topIssues || [];
+      const shownIssues = topIssues.slice(0, 6);
+      const eventsWord = issueEventsHeader(topIssues) === 'Events in window' ? 'events in window' : 'events';
+
+      const compareSelect = `
+        <select aria-label="Compare version" class="filter-select" id="compareVersionSelect" title="Compare against a version">
+          <option value="all"${state.compareVersion === 'all' ? ' selected' : ''}>vs the previous version</option>
+          ${(state.versions || []).filter(v => !comp || v !== comp.currentVersion).map(v => `<option value="${escapeHtml(v)}"${v === state.compareVersion ? ' selected' : ''}>vs v${escapeHtml(v)}</option>`).join('')}
+        </select>
+      `;
+      const compHtml = comp ? panelCard(
+        `v${comp.currentVersion} against v${comp.previousVersion}`,
+        'Release health, session length and start-up time against the version before (or the one you pick).',
+        `<div class="kpi-grid" style="margin-bottom:0;">
+          <div class="kpi-card">
+            <div class="kpi-label">Crash-free sessions</div>
+            <div class="kpi-value">${comp.current.crashFreePct}%</div>
+            <div class="kpi-sub"><span class="delta-badge ${comp.deltas.crashFreePctDelta >= 0 ? 'good' : 'bad'}">${comp.deltas.crashFreePctDelta >= 0 ? '+' : ''}${comp.deltas.crashFreePctDelta} pts</span> v${escapeHtml(comp.previousVersion)}: ${comp.previous.crashFreePct}%</div>
           </div>
-          <div class="kpi-grid" style="margin-bottom:0;">
-            <div class="kpi-card" style="padding:14px;">
-              <div class="kpi-label">Crash-Free Rate Delta</div>
-              <div style="display:flex;align-items:baseline;gap:10px;">
-                <div class="kpi-value" style="font-size:22px;">${comp.current.crashFreePct}%</div>
-                <span class="delta-badge ${comp.deltas.crashFreePctDelta >= 0 ? 'good' : 'bad'}">
-                  ${comp.deltas.crashFreePctDelta >= 0 ? '+' : ''}${comp.deltas.crashFreePctDelta}% vs v${escapeHtml(comp.previousVersion)}
-                </span>
-              </div>
-              <div class="kpi-sub">Baseline v${escapeHtml(comp.previousVersion)}: ${comp.previous.crashFreePct}%</div>
-            </div>
-            <div class="kpi-card" style="padding:14px;">
-              <div class="kpi-label">Avg Session Length Delta</div>
-              <div style="display:flex;align-items:baseline;gap:10px;">
-                <div class="kpi-value" style="font-size:22px;">${Math.floor(comp.current.avgSessionSec / 60)}m ${comp.current.avgSessionSec % 60}s</div>
-                <span class="delta-badge ${comp.deltas.avgSessionSecDelta >= 0 ? 'good' : 'neutral'}">
-                  ${comp.deltas.avgSessionSecDelta >= 0 ? '+' : ''}${comp.deltas.avgSessionSecDelta}s
-                </span>
-              </div>
-              <div class="kpi-sub">Baseline v${escapeHtml(comp.previousVersion)}: ${Math.floor(comp.previous.avgSessionSec / 60)}m ${comp.previous.avgSessionSec % 60}s</div>
-            </div>
-            <div class="kpi-card" style="padding:14px;">
-              <div class="kpi-label">Cold Start / Preload Latency</div>
-              <div style="display:flex;align-items:baseline;gap:10px;">
-                <div class="kpi-value" style="font-size:22px;">${comp.current.avgStartupMs} ms</div>
-                <span class="delta-badge ${comp.deltas.startupMsDelta <= 0 ? 'good' : 'bad'}">
-                  ${comp.deltas.startupMsDelta > 0 ? '+' : ''}${comp.deltas.startupMsDelta} ms
-                </span>
-              </div>
-              <div class="kpi-sub">Baseline v${escapeHtml(comp.previousVersion)}: ${comp.previous.avgStartupMs} ms</div>
-            </div>
-            <div class="kpi-card" style="padding:14px;">
-              <div class="kpi-label">New Unresolved Issues in v${escapeHtml(comp.currentVersion)}</div>
-              <div style="display:flex;align-items:baseline;gap:10px;">
-                <div class="kpi-value" style="font-size:22px;color:${comp.deltas.newIssuesInCurrent > 0 ? 'var(--amber)' : 'var(--green)'};">${comp.deltas.newIssuesInCurrent}</div>
-                <span class="delta-badge ${comp.deltas.newIssuesInCurrent === 0 ? 'good' : 'bad'}">
-                  ${comp.deltas.newIssuesInCurrent === 0 ? 'Clean Release' : 'Needs Triage'}
-                </span>
-              </div>
-              <div class="kpi-sub">${comp.current.sessions} sessions on v${escapeHtml(comp.currentVersion)}</div>
-            </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Average session</div>
+            <div class="kpi-value">${escapeHtml(chartDuration(comp.current.avgSessionSec))}</div>
+            <div class="kpi-sub"><span class="delta-badge ${comp.deltas.avgSessionSecDelta >= 0 ? 'good' : 'neutral'}">${comp.deltas.avgSessionSecDelta >= 0 ? '+' : '−'}${escapeHtml(chartDuration(Math.abs(comp.deltas.avgSessionSecDelta)))}</span> v${escapeHtml(comp.previousVersion)}: ${escapeHtml(chartDuration(comp.previous.avgSessionSec))}</div>
           </div>
-        </div>
-      ` : '';
+          <div class="kpi-card">
+            <div class="kpi-label">Cold start and preload</div>
+            <div class="kpi-value">${comp.current.avgStartupMs} ms</div>
+            <div class="kpi-sub"><span class="delta-badge ${comp.deltas.startupMsDelta <= 0 ? 'good' : 'bad'}">${comp.deltas.startupMsDelta > 0 ? '+' : ''}${comp.deltas.startupMsDelta} ms</span> v${escapeHtml(comp.previousVersion)}: ${comp.previous.avgStartupMs} ms</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">New open issues in v${escapeHtml(comp.currentVersion)}</div>
+            <div class="kpi-value">${comp.deltas.newIssuesInCurrent}</div>
+            <div class="kpi-sub">${comp.deltas.newIssuesInCurrent === 0 ? statusMark('good', 'Clean release') : statusMark('warning', 'Needs triage')} · ${comp.current.sessions} sessions</div>
+          </div>
+        </div>`,
+        compareSelect,
+      ) : '';
 
       root.innerHTML = `
         ${s.totalSessions === 0 && state.environment !== 'demo' ? `
-          <div class="panel-card" style="border-color:rgba(56,189,248,0.45);background:rgba(14,165,233,0.08);display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
+          <div class="panel-card" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
             <div>
-              <div style="font-weight:700;font-size:14px;color:var(--text);">Live ${escapeHtml(state.environment.toUpperCase())} database is connected and ready (0 sessions recorded yet)</div>
-              <div style="font-size:12px;color:var(--text-secondary);margin-top:3px;">Want to preview how Cortex looks with 140 sessions, version comparisons, 13-panel heatmaps, crash stack traces, and bug reports?</div>
+              <div style="font-weight:700;font-size:14px;color:var(--text);">${escapeHtml(capitalize(state.environment))} is connected: no sessions in the ${escapeHtml(windowLabel())}</div>
+              <div style="font-size:12px;color:var(--text-secondary);margin-top:3px;">Try a longer window above, or the demo to see every chart with sample data.</div>
             </div>
-            <button class="btn primary" onclick="setEnvironment('demo')">🧪 Load Interactive Demo Data</button>
+            <button class="btn primary" onclick="setEnvironment('demo')">Open the demo</button>
           </div>
         ` : ''}
-        <!-- 1. Plain-English Morning Briefing Banner -->
         <div class="briefing-card ${escapeHtml(briefing.status)}">
           <div class="briefing-header">
             <div class="briefing-title">
-              <span style="width:10px;height:10px;border-radius:50%;background:${statusDotColor};box-shadow:0 0 10px ${statusDotColor};display:inline-block;"></span>
-              <span>Morning Briefing: ${escapeHtml(briefing.headline)}</span>
+              <span style="width:10px;height:10px;border-radius:50%;background:${statusDotColor};display:inline-block;"></span>
+              <span>${escapeHtml(briefing.headline)}</span>
             </div>
-            <span style="font-size:11px;color:var(--muted);">Click any action item below to jump straight to root cause</span>
           </div>
           ${(briefing.actionItems && briefing.actionItems.length > 0) ? `
             <div class="action-items-row">
@@ -2627,106 +3209,33 @@
         </div>
 
         <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-label">Crash-Free Sessions</div>
-            <div class="kpi-value" style="color: ${cfColor}">${s.crashFreeSessionsPct}%</div>
-            <div class="kpi-sub">${s.totalSessions - s.crashedSessions} clean of ${s.totalSessions} sessions</div>
-            ${data.testTraffic && !data.testTraffic.included ? `
-              <div class="kpi-sub" id="testSessionsHidden">${data.testTraffic.hiddenSessions} test session${data.testTraffic.hiddenSessions === 1 ? '' : 's'} hidden</div>
-            ` : ''}
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Crash-Free Players</div>
-            <div class="kpi-value" style="color: ${cfColor}">${s.crashFreeUsersPct}%</div>
-            <div class="kpi-sub">${s.activeUsers} active players in window</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Avg Session Length</div>
-            <div class="kpi-value">${Math.floor(s.avgSessionSec / 60)}m ${s.avgSessionSec % 60}s</div>
-            <div class="kpi-sub">Across ${s.totalSessions} tracked sessions</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Sessions With Logged Error</div>
-            <div class="kpi-value">${s.erroredSessions}</div>
-            <div class="kpi-sub">${s.crashedSessions} fatal crashes</div>
-          </div>
+          ${statTile({ label: 'Active players', value: s.activeUsers, sub: `${s.totalSessions} session${s.totalSessions === 1 ? '' : 's'}${hidden}`, spark: act ? chartSparkline(act.players) : '' })}
+          ${statTile({ label: 'Crash-free sessions', value: `${cf}%`, sub: `${cfMark} · ${s.crashedSessions} crashed · ${s.erroredSessions} with an error`, spark: act ? chartSparkline(act.crashed, CHART_COLORS.critical) : '' })}
+          ${statTile({ label: 'Crash-free players', value: `${s.crashFreeUsersPct}%`, sub: `of ${s.activeUsers} player${s.activeUsers === 1 ? '' : 's'}` })}
+          ${statTile({ label: 'Average session', value: chartDuration(s.avgSessionSec), sub: `Across ${s.totalSessions} session${s.totalSessions === 1 ? '' : 's'}`, spark: chartSparkline(avgLength) })}
+        </div>
+
+        ${panelCard(`Active players per ${per}`, `iOS and Android, ${windowLabel()}, in your time zone. A player counts once per ${per}.`, activityBody)}
+
+        <div class="grid-2">
+          ${panelCard('Versions', 'Sessions per version and platform, with each one’s crash-free rate.', versionBody)}
+          ${panelCard('Top issues', 'Regressions first, then by events. Open one for its stack trace and the player\u2019s steps.', `
+            <div class="issue-list">
+              ${shownIssues.map(iss => `
+                <button type="button" class="issue-row" onclick="openIssueDetail(${Number(iss.id)})">
+                  <span class="issue-main">
+                    <span class="issue-title">${escapeHtml(iss.title)}</span>
+                    <span class="issue-meta">${escapeHtml(platformLabel(iss.platform))} · ${issueEventsCount(iss)} ${eventsWord} · ${iss.affected_users_count ?? 1} player${(iss.affected_users_count ?? 1) === 1 ? '' : 's'} · v${escapeHtml(iss.first_seen_version)} → v${escapeHtml(iss.last_seen_version)}</span>
+                  </span>
+                  <span class="pill ${escapeHtml(iss.status)}">${escapeHtml(iss.status)}</span>
+                </button>
+              `).join('') || '<div class="kpi-sub">No open issues in this window.</div>'}
+            </div>
+            ${topIssues.length > shownIssues.length ? `<button type="button" class="btn" style="margin-top:12px;" onclick="switchTab('triage')">All ${topIssues.length} issues in Triage →</button>` : ''}
+          `)}
         </div>
 
         ${compHtml}
-
-        <div class="grid-2">
-          <div class="panel-card">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">Release & Version Health</div>
-                <div class="panel-subtitle">Adoption share, crash-free rate, and error volume per release</div>
-              </div>
-            </div>
-            <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
-              <thead>
-                <tr>
-                  <th>Version</th>
-                  <th>Platform</th>
-                  <th>Adoption</th>
-                  <th>Sessions</th>
-                  <th>Crash-Free</th>
-                  <th>Errors</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${(data.versionBreakdown || []).map(v => `
-                  <tr>
-                    <td><strong>v${escapeHtml(v.appVersion)}</strong></td>
-                    <td><span class="pill ${escapeHtml(v.platform)}">${escapeHtml(v.platform)}</span></td>
-                    <td>
-                      <div style="display:flex;align-items:center;gap:8px;">
-                        <div class="bar-track" style="width:70px;"><div class="bar-fill" style="width:${v.adoptionPct}%;background:var(--accent);"></div></div>
-                        <span>${v.adoptionPct}%</span>
-                      </div>
-                    </td>
-                    <td>${v.sessions} <span style="color:var(--muted)">(${v.users} users)</span></td>
-                    <td style="color:${v.crashFreePct >= 99.5 ? 'var(--green)' : 'var(--amber)'};font-weight:700;">${v.crashFreePct}%</td>
-                    <td>${v.totalErrors}</td>
-                  </tr>
-                `).join('') || '<tr><td colspan="6" style="color:var(--muted)">No sessions recorded for this filter.</td></tr>'}
-              </tbody>
-            </table></div>
-          </div>
-
-          <div class="panel-card">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">Top Active Issues & Regressions</div>
-                <div class="panel-subtitle">Click any issue to inspect symbolicated stacktrace & player journey storyboard</div>
-              </div>
-            </div>
-            <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
-              <thead>
-                <tr>
-                  <th>Issue</th>
-                  <th>Platform</th>
-                  <th>${issueEventsHeader(data.topIssues)}</th>
-                  <th>Users</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${(data.topIssues || []).map(iss => `
-                  <tr class="clickable-row" onclick="openIssueDetail(${iss.id})">
-                    <td>
-                      <div style="font-weight:600;color:var(--text);">${escapeHtml(iss.title)}</div>
-                      <div style="font-size:11px;color:var(--muted);">First: v${escapeHtml(iss.first_seen_version)} · Last: v${escapeHtml(iss.last_seen_version)}</div>
-                    </td>
-                    <td><span class="pill ${escapeHtml(iss.platform)}">${escapeHtml(iss.platform)}</span></td>
-                    <td><strong>${issueEventsCount(iss)}</strong></td>
-                    <td>${iss.affected_users_count ?? 1}</td>
-                    <td><span class="pill ${escapeHtml(iss.status)}">${escapeHtml(iss.status)}</span></td>
-                  </tr>
-                `).join('') || '<tr><td colspan="5" style="color:var(--green)">Zero unresolved issues in this environment!</td></tr>'}
-              </tbody>
-            </table></div>
-          </div>
-        </div>
       `;
     }
 
@@ -2764,78 +3273,6 @@
       return bucket.date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     }
 
-    function renderNewPlayersCard(rows) {
-      const buckets = newPlayersByDay(rows);
-      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
-      if (!buckets) {
-        return `
-          <div class="panel-card">
-            <div class="panel-title">New Players · iOS vs Android</div>
-            <div class="panel-subtitle">This environment's backend does not send new players yet (backend 1.79.3 or later).</div>
-          </div>
-        `;
-      }
-      const today = buckets[0];
-      const week = buckets.slice(0, 7).reduce((a, b) => ({ ios: a.ios + b.ios, android: a.android + b.android, total: a.total + b.total }), { ios: 0, android: 0, total: 0 });
-      const share = (n, total) => total > 0 ? `${Math.round((n / total) * 100)}%` : '–';
-      return `
-        <div class="panel-card">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">New Players · iOS vs Android</div>
-              <div class="panel-subtitle">Accounts created per day in your time zone (${escapeHtml(timeZone)}). Bots never count; team and test accounts only while test traffic is shown. Platform: the app's install report, else its first Cortex session.</div>
-            </div>
-          </div>
-          <div class="kpi-grid">
-            <div class="kpi-card" style="padding:14px;">
-              <div class="kpi-label">Today · iOS</div>
-              <div class="kpi-value" style="font-size:22px;color:var(--accent);">${today.ios}</div>
-              <div class="kpi-sub">${share(today.ios, today.total)} of today's new players</div>
-            </div>
-            <div class="kpi-card" style="padding:14px;">
-              <div class="kpi-label">Today · Android</div>
-              <div class="kpi-value" style="font-size:22px;color:var(--green);">${today.android}</div>
-              <div class="kpi-sub">${share(today.android, today.total)} of today's new players</div>
-            </div>
-            <div class="kpi-card" style="padding:14px;">
-              <div class="kpi-label">Today · All</div>
-              <div class="kpi-value" style="font-size:22px;">${today.total}</div>
-              <div class="kpi-sub">${today.unknown} unknown platform · ${today.linked} linked Apple/Google</div>
-            </div>
-            <div class="kpi-card" style="padding:14px;">
-              <div class="kpi-label">Last 7 Days</div>
-              <div class="kpi-value" style="font-size:22px;">${week.total}</div>
-              <div class="kpi-sub">iOS ${week.ios} · Android ${week.android}</div>
-            </div>
-          </div>
-          <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
-            <thead>
-              <tr>
-                <th>Day</th>
-                <th>iOS</th>
-                <th>Android</th>
-                <th>Unknown</th>
-                <th>Total</th>
-                <th>Linked</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${buckets.map(b => `
-                <tr>
-                  <td><strong>${escapeHtml(newPlayersDayLabel(b))}</strong></td>
-                  <td>${b.ios}</td>
-                  <td>${b.android}</td>
-                  <td style="color:var(--muted);">${b.unknown}</td>
-                  <td><strong>${b.total}</strong></td>
-                  <td style="color:var(--muted);">${b.linked}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table></div>
-        </div>
-      `;
-    }
-
     function queueQualityNote(mode) {
       const notes = [];
       if (mode.duplicateQueueEvents) notes.push(`${mode.duplicateQueueEvents} repeated event${mode.duplicateQueueEvents === 1 ? '' : 's'} ignored`);
@@ -2846,281 +3283,181 @@
       return notes.join(' · ');
     }
 
-    function renderRadar(root, data) {
+    function renderNewPlayersCard(rows) {
+      const days = newPlayersByDay(rows);
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
+      if (!days) {
+        return `
+          <div class="panel-card">
+            <div class="panel-title">New players per day</div>
+            <div class="panel-subtitle">This environment's backend does not send new players yet (backend 1.79.3 or later).</div>
+          </div>
+        `;
+      }
+      const today = days[0];
+      const week = days.slice(0, 7).reduce((a, b) => ({ ios: a.ios + b.ios, android: a.android + b.android, total: a.total + b.total }), { ios: 0, android: 0, total: 0 });
+      const share = (n, total) => total > 0 ? `${Math.round((n / total) * 100)}%` : '–';
+      // The chart runs oldest to newest; its buckets are the same local days.
+      const oldestFirst = days.slice().reverse();
+      const end = new Date(today.date);
+      end.setDate(end.getDate() + 1);
+      const buckets = { unit: 'day', starts: oldestFirst.map(b => b.date.getTime()), end: end.getTime() };
+      const series = [
+        { label: 'iOS', color: CHART_COLORS.ios, values: oldestFirst.map(b => b.ios) },
+        { label: 'Android', color: CHART_COLORS.android, values: oldestFirst.map(b => b.android) },
+        ...(oldestFirst.some(b => b.unknown > 0) ? [{ label: 'Unknown', color: CHART_COLORS.other, values: oldestFirst.map(b => b.unknown) }] : []),
+      ];
+      return panelCard(
+        'New players per day',
+        `Accounts made per day in your time zone (${timeZone}), the last 14 days whatever the window. Bots never count; team and test accounts only while test traffic is shown. Platform: the app's install report, else its first Cortex session.`,
+        `
+          <div class="kpi-grid">
+            ${statTile({ label: 'Today · iOS', value: today.ios, sub: `${share(today.ios, today.total)} of today's new players`, swatch: CHART_COLORS.ios })}
+            ${statTile({ label: 'Today · Android', value: today.android, sub: `${share(today.android, today.total)} of today's new players`, swatch: CHART_COLORS.android })}
+            ${statTile({ label: 'Today · All', value: today.total, sub: `${today.unknown} unknown platform · ${today.linked} linked Apple/Google` })}
+            ${statTile({ label: 'Last 7 days', value: week.total, sub: `iOS ${week.ios} · Android ${week.android}` })}
+          </div>
+          ${chartColumns({ buckets, series, height: 140, emptyText: 'No new players in the last 14 days' })}
+          ${chartLegend(series)}
+          ${chartDataTable(['Day', 'iOS', 'Android', 'Unknown', 'Total', 'Linked'], days.map(b => [newPlayersDayLabel(b), b.ios, b.android, b.unknown, b.total, b.linked]))}
+        `,
+      );
+    }
+
+    function renderPlayers(root, data) {
+      const PANEL_VERDICTS = {
+        loved: { label: 'Loved', color: CHART_COLORS.good },
+        healthy: { label: 'Healthy', color: CHART_COLORS.accent },
+        underused: { label: 'Underused', color: CHART_COLORS.warning },
+        ignored: { label: 'Ignored', color: CHART_COLORS.critical },
+      };
+      const EXPRESSION_SET_ORDER = ['default', 'set1', 'set2', 'spades', 'hearts', 'diamonds', 'clubs'];
       const features = data.featureLeaderboard || [];
-      const showroom = data.characterShowroom || [];
-      const leaveBreakdown = data.tableLeaveBreakdown || [];
-      const insights = data.tableInsights || {};
+      const showroom = (data.characterShowroom || []).filter(c => c.equippedCount > 0 || c.previews > 0);
+      const verdicts = Object.keys(PANEL_VERDICTS).filter(k => features.some(f => f.status === k));
+      const opened = features.filter(f => f.opens > 0);
+      const sets = (data.expressionPopularity || []).slice()
+        .sort((a, b) => EXPRESSION_SET_ORDER.indexOf(a.setKey) - EXPRESSION_SET_ORDER.indexOf(b.setKey));
 
       root.innerHTML = `
         ${renderNewPlayersCard(data.newPlayers)}
 
-        <!-- Visual App Heatmap of Minamo Poker Hub -->
-        <div class="panel-card">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">Visual App Engagement Heatmap — Hot Zones vs. Dead Zones</div>
-              <div class="panel-subtitle">Spatial view of all 13 Minamo Poker Home panels color-coded by player reach, dwell time, and meaningful interaction</div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <span class="pill loved">Loved (≥45% DAU)</span>
-              <span class="pill healthy">Healthy</span>
-              <span class="pill underused">Underused</span>
-              <span class="pill ignored">Dead Zone (&lt;12% DAU)</span>
-            </div>
-          </div>
-          <div class="app-map-grid">
-            ${features.map(f => {
-              const barColor = f.status === 'loved' ? 'var(--green)' : f.status === 'healthy' ? 'var(--accent)' : f.status === 'underused' ? 'var(--amber)' : 'var(--red)';
-              return `
-                <div class="map-node ${escapeHtml(f.status)}">
-                  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
-                    <span style="font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:700;">${escapeHtml(f.group)}</span>
-                    <span class="pill ${escapeHtml(f.status)}" style="font-size:9px;padding:2px 6px;">${escapeHtml(f.status)}</span>
-                  </div>
-                  <div style="font-weight:700;font-size:14px;margin-bottom:8px;">${escapeHtml(f.label)}</div>
-                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;">
-                    <span style="color:var(--text-secondary)">Reach: <strong style="color:var(--text)">${f.dauSharePct}% DAU</strong></span>
-                    <span style="color:var(--muted)">${f.avgDwellSec}s dwell</span>
-                  </div>
-                  <div class="bar-track" style="height:6px;margin-bottom:6px;">
-                    <div class="bar-fill" style="width:${Math.min(100, f.dauSharePct)}%;background:${barColor};"></div>
-                  </div>
-                  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);">
-                    <span>${f.opens} opens (${f.opensPerUser}/user)</span>
-                    <span>${f.interactionRatePct}% interact</span>
-                  </div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        </div>
-
-        <!-- Poker, Roster & Showroom Conversion Insights -->
         <div class="grid-2">
-          <div class="panel-card">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">Character Roster & Showroom Conversion Leaderboard</div>
-                <div class="panel-subtitle">Compares equipped play share vs. Showroom previews and purchases for Anya, Amara, Brutus, and Lenny</div>
-              </div>
-            </div>
-            <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
-              <thead>
-                <tr>
-                  <th>Character</th>
-                  <th>Equipped Share</th>
-                  <th>Showroom Previews</th>
-                  <th>Purchases</th>
-                  <th>Preview → Buy</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${showroom.map(c => `
-                  <tr>
-                    <td><strong style="text-transform:capitalize;font-size:14px;">${escapeHtml(c.characterId)}</strong></td>
-                    <td>
-                      <div style="display:flex;align-items:center;gap:8px;">
-                        <div class="bar-track" style="width:75px;"><div class="bar-fill" style="width:${c.sharePct}%;background:var(--accent);"></div></div>
-                        <strong>${c.sharePct}%</strong>
-                      </div>
-                    </td>
-                    <td>${c.previews}</td>
-                    <td><strong>${c.purchases}</strong> <span style="color:var(--muted);font-size:11px;">(${c.abandons} abandoned)</span></td>
-                    <td><span class="pill ${c.conversionPct >= 20 ? 'loved' : 'healthy'}">${c.conversionPct}%</span></td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table></div>
-
-            <div style="margin-top:20px;">
-              <div style="font-size:12px;font-weight:700;margin-bottom:8px;">Expression Set Usage Share Across All Characters</div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;">
-                ${(data.expressionPopularity || []).map(e => `
-                  <div style="background:#080c14;border:1px solid var(--border-subtle);border-radius:8px;padding:8px 10px;">
-                    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
-                      <strong style="text-transform:capitalize">${escapeHtml(e.setKey)}</strong>
-                      <span style="color:var(--purple);font-weight:700;">${e.sharePct}%</span>
-                    </div>
-                    <div class="bar-track" style="height:5px;"><div class="bar-fill" style="width:${e.sharePct}%;background:var(--purple);"></div></div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          </div>
-
-          <!-- Table Depth, Why Players Leave & Economy Friction -->
-          <div class="panel-card">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">Poker Table Depth & Why Players Leave Tables</div>
-                <div class="panel-subtitle">Distinguishes clean voluntary exits from chip bust-outs, turn timeout kicks, and socket drops</div>
-              </div>
-            </div>
-
-            <div style="margin-bottom:18px;">
-              ${leaveBreakdown.map(l => {
-                const labelMap = {
-                  voluntary: 'Voluntary Stand Up / Leave',
-                  busted_chips: 'Busted Out of Chips (0 Stack)',
-                  timeout_kicked: 'Kicked for Turn Inactivity / AFK',
-                  disconnected: 'Realtime Socket Disconnect',
-                };
-                const colorMap = {
-                  voluntary: 'var(--green)',
-                  busted_chips: 'var(--amber)',
-                  timeout_kicked: 'var(--purple)',
-                  disconnected: 'var(--red)',
-                };
-                return `
-                  <div style="margin-bottom:10px;">
-                    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
-                      <strong>${escapeHtml(labelMap[l.reason] || l.reason)}</strong>
-                      <span><strong>${l.sharePct}%</strong> (${l.count} tables)</span>
-                    </div>
-                    <div class="bar-track"><div class="bar-fill" style="width:${l.sharePct}%;background:${colorMap[l.reason] || 'var(--accent)'};"></div></div>
-                  </div>
-                `;
-              }).join('')}
-            </div>
-
-            <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:0;gap:12px;">
-              <div class="kpi-card" style="padding:12px;background:#080c14;">
-                <div class="kpi-label">Total Hands Completed</div>
-                <div class="kpi-value" style="font-size:20px;">${insights.totalHandsCompleted || 0}</div>
-                <div class="kpi-sub">Turn Timeout Rate: ${insights.turnTimeoutRatePct || 0}% (${insights.turnTimeouts || 0})</div>
-              </div>
-              <div class="kpi-card" style="padding:12px;background:#080c14;">
-                <div class="kpi-label">Out-of-Chips Friction</div>
-                <div class="kpi-value" style="font-size:20px;color:var(--amber);">${insights.insufficientFundsCount || 0}</div>
-                <div class="kpi-sub">Blocked buy-ins / store taps due to low balance</div>
-              </div>
-            </div>
-          </div>
+          ${panelCard('Player journey', `Players reaching each step, ${windowLabel()}. Each bar is the share of the first step.`, chartFunnel(data.journeyFunnel))}
+          ${panelCard('What players open', 'Each home panel’s reach: the share of players who opened it. Loved: 45% or more, and most stay to use it. Ignored: under 12%.', `
+            ${chartHBars(opened.map(f => {
+              const verdict = PANEL_VERDICTS[f.status] || PANEL_VERDICTS.healthy;
+              return {
+                label: f.label,
+                value: f.dauSharePct,
+                valueText: `${f.dauSharePct}%`,
+                sub: `${verdict.label} · ${f.opens} open${f.opens === 1 ? '' : 's'} · ${f.avgDwellSec}s average · ${f.interactionRatePct}% interact`,
+                color: verdict.color,
+                tip: `${f.label} (${f.group})\n${f.dauSharePct}% of players · ${f.uniqueUsers} players\n${f.opens} opens, ${f.opensPerUser} per player\n${f.avgDwellSec}s average · ${f.interactionRatePct}% interact\n${verdict.label}`,
+              };
+            }), { max: 100, emptyText: 'No panels opened in this window' })}
+            ${opened.length ? chartLegend(verdicts.map(k => PANEL_VERDICTS[k])) : ''}
+            ${features.length > opened.length ? `<div class="kpi-sub" style="margin-top:10px;">Not opened: ${escapeHtml(features.filter(f => f.opens === 0).map(f => f.label).join(', '))}</div>` : ''}
+          `)}
         </div>
 
         <div class="grid-2">
-          <!-- Player Journey Funnel -->
-          <div class="panel-card">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">End-to-End Player Session Funnel</div>
-                <div class="panel-subtitle">Identifies exact drop-off between Cold Launch, Matchmaking, and Play Again</div>
-              </div>
-            </div>
-            <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
-              <thead>
-                <tr>
-                  <th>Stage</th>
-                  <th>Players</th>
-                  <th>Retention</th>
-                  <th>Step Drop-Off</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${(data.journeyFunnel || []).map(step => `
-                  <tr>
-                    <td><strong>${escapeHtml(step.step)}</strong></td>
-                    <td>${step.users}</td>
-                    <td>
-                      <div style="display:flex;align-items:center;gap:8px;">
-                        <div class="bar-track" style="width:90px;"><div class="bar-fill" style="width:${step.conversionFromStartPct}%;background:var(--indigo);"></div></div>
-                        <span>${step.conversionFromStartPct}%</span>
-                      </div>
-                    </td>
-                    <td style="color:${step.dropOffFromPrevPct > 20 ? 'var(--red)' : 'var(--muted)'}">
-                      ${step.dropOffFromPrevPct > 0 ? `-${step.dropOffFromPrevPct}%` : '—'}
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table></div>
-          </div>
+          ${panelCard('Characters', 'Times each character was picked or equipped, with the store’s previews and purchases of it.', chartHBars(showroom.map(c => ({
+            label: capitalize(c.characterId),
+            value: c.equippedCount,
+            valueText: `${c.equippedCount} · ${c.sharePct}%`,
+            sub: `${c.previews} preview${c.previews === 1 ? '' : 's'} · ${c.purchases} bought · ${c.abandons} abandoned · ${c.conversionPct}% preview to buy`,
+          })), { emptyText: 'No characters picked in this window' }))}
+          ${panelCard('Expression sets', 'Picks, previews and purchases that name a set.', chartShareBar(sets.map(e => ({
+            label: capitalize(e.setKey),
+            value: e.count,
+            color: CHART_SERIES[Math.max(0, EXPRESSION_SET_ORDER.indexOf(e.setKey)) % CHART_SERIES.length],
+          })), { emptyText: 'No sets named in this window' }))}
+        </div>
+      `;
+    }
 
-          <!-- Game Mode Comparison -->
-          <div class="panel-card">
-            <div class="panel-header">
-              <div>
-                <div class="panel-title">Game Modes & Matchmaking Health</div>
-                <div class="panel-subtitle">Cancellation rate and wait time count each queue attempt once. Attempts are reconstructed from session events; seating takes precedence when a cancellation races with a match.</div>
-              </div>
-            </div>
-            <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
-              <thead>
-                <tr>
-                  <th>Mode</th>
-                  <th>Queue Attempts</th>
-                  <th>Avg Wait</th>
-                  <th>Cancel %</th>
-                  <th>AI Fallback</th>
-                  <th>Avg Hands</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${(data.gameModes || []).map(m => `
-                  <tr>
-                    <td><strong style="text-transform:uppercase;white-space:nowrap">${escapeHtml(m.mode)}</strong></td>
-                    <td>${m.queueJoins}</td>
-                    <td>${m.avgWaitSec}s</td>
-                    <td style="color:${m.cancelRatePct > 15 ? 'var(--amber)' : 'var(--text-secondary)'}">
-                      ${m.queueJoins > 0 ? `${m.cancelRatePct}%` : '—'}
-                      <div style="font-size:11px;color:var(--muted);margin-top:3px;">${m.queueCancels || 0} of ${m.queueJoins} attempts</div>
-                    </td>
-                    <td>${m.aiFallbackPct}%</td>
-                    <td><strong>${m.avgHandsPerSession}</strong></td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table></div>
-            ${(data.gameModes || []).filter(m => queueQualityNote(m)).map(m => `
-              <div class="panel-subtitle" style="margin-top:10px;"><strong>${escapeHtml(m.mode.toUpperCase())}:</strong> ${escapeHtml(queueQualityNote(m))}.</div>
-            `).join('')}
-          </div>
+    function renderGames(root, data) {
+      const MODE_LABELS = { casual: 'Casual', ranked: 'Ranked', tourney: 'Tourney' };
+      const LEAVE_LABELS = {
+        voluntary: 'Left on their own',
+        busted_chips: 'Busted (out of chips)',
+        timeout_kicked: 'Kicked for timing out',
+        disconnected: 'Connection dropped',
+      };
+      const modes = data.gameModes || [];
+      const insights = data.tableInsights || {};
+      const hs = data.handSeries;
+      const per = hs && hs.buckets.unit === 'day' ? 'day' : 'hour';
+      const handSeries = hs ? ['casual', 'ranked', 'tourney'].map(m => ({ label: MODE_LABELS[m], color: CHART_COLORS[m], values: hs[m] })) : [];
+      const handTotals = hs ? hs.casual.map((v, i) => v + hs.ranked[i] + hs.tourney[i]) : [];
+      const attempts = modes.reduce((a, m) => a + (Number(m.queueJoins) || 0), 0);
+      const leaves = (data.tableLeaveBreakdown || []).filter(l => l.count > 0);
+      const handsBody = hs ? `
+        ${chartColumns({ buckets: hs.buckets, series: handSeries, emptyText: `No hands in the ${windowLabel()}` })}
+        ${chartLegend(handSeries)}
+        ${chartDataTable(['When', ...handSeries.map(x => x.label), 'Total'], bucketRows(hs.buckets, [...handSeries.map(x => x.values), handTotals]))}
+      ` : `<div class="chart-empty" style="height:120px">This server does not send hands over time yet.</div>`;
+      const notes = modes.filter(m => queueQualityNote(m)).map(m => `
+        <div class="panel-subtitle" style="margin-top:10px;"><strong>${escapeHtml(m.mode.toUpperCase())}:</strong> ${escapeHtml(queueQualityNote(m))}.</div>
+      `).join('');
+
+      root.innerHTML = `
+        <div class="kpi-grid">
+          ${statTile({ label: 'Hands played', value: insights.totalHandsCompleted || 0, sub: capitalize(windowLabel()), spark: chartSparkline(handTotals) })}
+          ${statTile({ label: 'Queue attempts', value: attempts, sub: modes.map(m => `${MODE_LABELS[m.mode] || m.mode} ${m.queueJoins}`).join(' · ') })}
+          ${statTile({ label: 'Turn timeouts', value: insights.turnTimeouts || 0, sub: `${insights.turnTimeoutRatePct || 0}% of hands` })}
+          ${statTile({ label: 'Connection drops', value: insights.realtimeDisconnects || 0, sub: `${insights.realtimeStateFallbacks || 0} state fallback${insights.realtimeStateFallbacks === 1 ? '' : 's'}` })}
         </div>
 
-        <!-- Detailed Feature Leaderboard Table -->
+        ${panelCard(`Hands per ${per}`, `Hands completed by mode, ${windowLabel()}, in your time zone.`, handsBody)}
+
+        <div class="grid-2">
+          ${panelCard('Modes and matchmaking', 'Cancellation rate and wait time count each queue attempt once. Attempts are reconstructed from session events; seating takes precedence when a cancellation races with a match.', `
+            ${attempts > 0 ? chartHBars(modes.map(m => ({
+              label: MODE_LABELS[m.mode] || m.mode,
+              value: m.queueJoins,
+              valueText: `${m.queueJoins} attempt${m.queueJoins === 1 ? '' : 's'}`,
+              sub: `${m.avgWaitSec}s average wait · ${m.queueJoins > 0 ? `${m.cancelRatePct}% cancelled (${m.queueCancels || 0} of ${m.queueJoins} attempts)` : 'none cancelled'} · ${m.aiFallbackPct}% with bots · ${m.avgHandsPerSession} hands per table`,
+              color: CHART_COLORS[m.mode] || CHART_COLORS.accent,
+            }))) : `<div class="chart-empty" style="height:80px">No queue attempts in this window</div>`}
+            ${notes}
+          `)}
+          ${panelCard('Why players leave tables', 'Each table a player left, by why they left it.', chartHBars(leaves.map(l => ({
+            label: LEAVE_LABELS[l.reason] || l.reason,
+            value: l.count,
+            valueText: `${l.count} · ${l.sharePct}%`,
+          })), { emptyText: 'No tables left in this window' }))}
+        </div>
+      `;
+    }
+
+    // The store as the apps report it, until the server's chip and money totals land (phase 3).
+    function renderEconomy(root, data) {
+      const showroom = (data.characterShowroom || []).filter(c => c.previews > 0 || c.purchases > 0 || c.abandons > 0);
+      const insights = data.tableInsights || {};
+      const total = key => showroom.reduce((a, c) => a + (Number(c[key]) || 0), 0);
+      const previews = total('previews');
+      const purchases = total('purchases');
+      root.innerHTML = `
         <div class="panel-card">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">Complete Feature Engagement Table</div>
-              <div class="panel-subtitle">Tabular breakdown of all 13 Home expanding panels sorted by Daily Active Player reach</div>
-            </div>
-          </div>
-          <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
-            <thead>
-              <tr>
-                <th>Feature / Home Panel</th>
-                <th>Category</th>
-                <th>Player Reach (% of DAU)</th>
-                <th>Total Opens</th>
-                <th>Avg Dwell Time</th>
-                <th>Interaction Rate</th>
-                <th>Verdict</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${features.map(f => {
-                const barColor = f.status === 'loved' ? 'var(--green)' : f.status === 'healthy' ? 'var(--accent)' : f.status === 'underused' ? 'var(--amber)' : 'var(--red)';
-                return `
-                  <tr>
-                    <td><strong>${escapeHtml(f.label)}</strong> <span style="color:var(--muted);font-size:11px;">(${escapeHtml(f.panelKey)})</span></td>
-                    <td style="color:var(--text-secondary)">${escapeHtml(f.group)}</td>
-                    <td>
-                      <div style="display:flex;align-items:center;gap:10px;">
-                        <div class="bar-track" style="width:110px;"><div class="bar-fill" style="width:${Math.min(100, f.dauSharePct)}%;background:${barColor};"></div></div>
-                        <strong>${f.dauSharePct}%</strong>
-                      </div>
-                    </td>
-                    <td>${f.opens} <span style="color:var(--muted)">(${f.opensPerUser}/user)</span></td>
-                    <td>${f.avgDwellSec}s</td>
-                    <td>${f.interactionRatePct}%</td>
-                    <td><span class="pill ${f.status}">${f.status}</span></td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table></div>
+          <div class="panel-title">Chips and money come next</div>
+          <div class="panel-subtitle">Chips won and lost at tables, spins, chip and token buys, and store spend at list price in USD, per day, need new server totals (phase 3 of the Cortex redesign). Until then this tab shows what the apps report from the store.</div>
         </div>
+
+        <div class="kpi-grid">
+          ${statTile({ label: 'Store previews', value: previews, sub: capitalize(windowLabel()) })}
+          ${statTile({ label: 'Purchases', value: purchases, sub: previews > 0 ? `${Math.round((purchases / previews) * 1000) / 10}% of previews` : 'No previews' })}
+          ${statTile({ label: 'Purchases abandoned', value: insights.purchaseAbandonedCount || 0, sub: 'Opened and backed out' })}
+          ${statTile({ label: 'Out of chips', value: insights.insufficientFundsCount || 0, sub: 'A buy-in or store tap blocked by a low balance' })}
+        </div>
+
+        ${panelCard('Store by character', `Previews of each character’s items and what was bought, ${windowLabel()}.`, chartHBars(showroom.map(c => ({
+          label: capitalize(c.characterId),
+          value: c.previews,
+          valueText: `${c.previews} preview${c.previews === 1 ? '' : 's'} · ${c.purchases} bought`,
+          sub: `${c.conversionPct}% preview to buy · ${c.abandons} abandoned`,
+        })), { emptyText: 'No store previews in this window' }))}
       `;
     }
 
@@ -3134,13 +3471,6 @@
           });
         });
       });
-    }
-
-    function toggleMobileFilters() {
-      const open = document.getElementById('portalHeader').classList.toggle('filters-open');
-      const button = document.getElementById('mobileFiltersToggle');
-      button.setAttribute('aria-expanded', String(open));
-      button.textContent = open ? 'Close filters' : 'Filters & tools';
     }
 
     function renderTriage(root, data) {
@@ -3189,42 +3519,14 @@
 
     function renderVitals(root, data) {
       const spans = data.spans || [];
-      root.innerHTML = `
-        <div class="panel-card">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">Performance Vitals & Automatic RPC / Edge Latency (p50 / p95 / p99)</div>
-              <div class="panel-subtitle">End-to-end client timing for Cold Start, Critical Asset Preload, Supabase RPCs, Edge Functions, and Realtime WebSocket</div>
-            </div>
-          </div>
-          <div class="table-scroll" role="region" aria-label="Data table, scroll horizontally for more columns" tabindex="0"><table>
-            <thead>
-              <tr>
-                <th>Operation / Span</th>
-                <th>Platforms</th>
-                <th>Samples</th>
-                <th>p50 (Median)</th>
-                <th>p95</th>
-                <th>p99</th>
-                <th>Failure Rate</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${spans.map(s => `
-                <tr>
-                  <td><strong style="font-family:monospace;">${escapeHtml(s.name)}</strong></td>
-                  <td>${(s.platforms || []).map(p => `<span class="pill ${escapeHtml(p)}">${escapeHtml(p)}</span>`).join(' ')}</td>
-                  <td>${s.count}</td>
-                  <td style="color:var(--green);font-weight:700;">${s.p50Ms} ms</td>
-                  <td style="color:${s.p95Ms > 1000 ? 'var(--amber)' : 'var(--text)'};font-weight:700;">${s.p95Ms} ms</td>
-                  <td>${s.p99Ms} ms</td>
-                  <td style="color:${s.errorRatePct > 1 ? 'var(--red)' : 'var(--muted)'}">${s.errorRatePct}%</td>
-                </tr>
-              `).join('') || '<tr><td colspan="7" style="color:var(--muted)">No performance spans recorded for this filter.</td></tr>'}
-            </tbody>
-          </table></div>
-        </div>
-      `;
+      root.innerHTML = panelCard(
+        'Latency',
+        `Per operation, ${windowLabel()}: the bar runs from p50 to p95, the dot is p50 and the tick p99, on one log scale. Cold start, preload, RPCs, edge functions and realtime.`,
+        chartRanges(spans.map(sp => ({ label: sp.name, p50Ms: sp.p50Ms, p95Ms: sp.p95Ms, p99Ms: sp.p99Ms, count: sp.count, errorRatePct: sp.errorRatePct })))
+          + chartDataTable(['Operation', 'Platforms', 'Samples', 'p50', 'p95', 'p99', 'Failed'], spans.map(sp => [
+            sp.name, (sp.platforms || []).map(platformLabel).join(', '), sp.count, `${sp.p50Ms} ms`, `${sp.p95Ms} ms`, `${sp.p99Ms} ms`, `${sp.errorRatePct}%`,
+          ])),
+      );
       labelRecordTables(root);
     }
 
@@ -3240,7 +3542,7 @@
           </div>
           <div class="report-grid">
             ${reports.map(r => `
-              <div class="report-card" style="background:#080c14;border:1px solid var(--border);border-radius:12px;padding:16px;">
+              <div class="report-card" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;">
                 <div class="report-header">
                   <div>
                     <strong>@${escapeHtml(r.username)}</strong>
@@ -3500,8 +3802,7 @@
         // Edge: a fresh snapshot. Local server: pull the new class with a sync of this environment.
         await syncSupabaseNow();
       }
-      const bannerText = document.getElementById('envBannerText');
-      bannerText.textContent = `✓ ${internal ? 'Marked' : 'Unmarked'} ${userId} as team. ${state.environment === 'demo' ? '' : bannerText.textContent}`.trim();
+      showToast(`${internal ? 'Marked' : 'Unmarked'} ${userId} as team.`);
       if (state.openIssueId) await openIssueDetail(state.openIssueId);
     }
 
@@ -3957,19 +4258,22 @@
       refreshActiveTab();
     }
 
-    async function syncSupabaseNow() {
-      const btn = document.getElementById('syncBtn');
-      const bannerText = document.getElementById('envBannerText');
-      const originalLabel = btn.innerHTML;
-      btn.disabled = true;
-      btn.innerHTML = '⟳ Syncing...';
+    // Refresh: the edge (and the demo) take a fresh snapshot; the local server syncs this environment
+    // from Supabase first. quiet: a refresh on coming back, so a failure only marks the button.
+    async function syncSupabaseNow({ quiet = false } = {}) {
+      if (state.refreshing) return;
+      state.refreshing = true;
+      setRefreshState('loading');
+      setPullIndicator('loading');
       try {
-        if (state.dataSource === 'edge') {
+        if (state.dataSource === 'edge' || state.environment === 'demo') {
           state.edgeSnapCache = null;
           await loadVersions();
           await refreshActiveTab();
-          bannerText.textContent = `✓ Refreshed live ${state.environment.toUpperCase()} snapshot from Supabase Edge Gate (${new Date().toLocaleTimeString()})`;
-          btn.innerHTML = '✓ Synced';
+          if (state.edgeLastError) {
+            setRefreshState('error', state.edgeLastError);
+            if (!quiet) showToast(state.edgeLastError, 'error');
+          } else setRefreshState('ok');
           return;
         }
         const res = await fetch(`/api/sync?environment=${encodeURIComponent(state.environment)}`, {
@@ -3981,27 +4285,177 @@
         const envResult = (data.environments || [])[0];
         await loadVersions();
         await refreshActiveTab();
+        const envName = capitalize(state.environment);
         if (envResult && envResult.status === 'synced') {
           const c = envResult.counts || {};
           const added = (c.sessions || 0) + (c.errorEvents || 0) + (c.productEvents || 0) + (c.performanceSpans || 0) + (c.bugReports || 0);
-          bannerText.textContent = `✓ Synced ${state.environment.toUpperCase()} from ${envResult.url} (${added} new records pulled at ${new Date().toLocaleTimeString()})`;
-          btn.innerHTML = '✓ Synced';
-        } else if (envResult && envResult.status === 'skipped') {
-          bannerText.textContent = `ℹ️ ${state.environment.toUpperCase()} Sync: ${envResult.reason}`;
-          btn.innerHTML = '⟳ Configure Key';
-        } else if (envResult && envResult.status === 'error') {
-          bannerText.textContent = `⚠️ ${state.environment.toUpperCase()} Sync Error: ${envResult.reason}`;
-          btn.innerHTML = '⚠️ Sync Failed';
+          setRefreshState('ok', `Synced ${envName} from ${envResult.url}: ${added} new records`);
+        } else {
+          const reason = envResult ? `${envName} sync ${envResult.status === 'skipped' ? 'skipped' : 'failed'}: ${envResult.reason}` : `${envName} sync failed`;
+          setRefreshState('error', reason);
+          if (!quiet) showToast(reason, 'error');
         }
       } catch (err) {
-        btn.innerHTML = '⚠️ Sync Error';
+        setRefreshState('error', 'The sync failed. Is the local server running?');
+        if (!quiet) showToast('The sync failed. Is the local server running?', 'error');
       } finally {
-        btn.disabled = false;
-        setTimeout(() => {
-          btn.innerHTML = originalLabel;
-        }, 3500);
+        state.refreshing = false;
+        setPullIndicator('hidden');
       }
     }
+
+    // Pull down on the page to refresh (owner, 2026-10-29): from the top of the page, 70 px of pull
+    // (after resistance) arms it, letting go refreshes. Sideways drags (the header's rows) are left alone.
+    const PULL_TRIGGER_PX = 70;
+    let pullGesture = null;
+
+    function setPullIndicator(mode, offset = 0) {
+      const el = document.getElementById('pullIndicator');
+      const container = document.querySelector('main.container');
+      const header = document.getElementById('portalHeader');
+      const top = header ? header.getBoundingClientRect().bottom : 0;
+      const text = document.getElementById('pullIndicatorText');
+      el.classList.toggle('armed', mode === 'armed');
+      el.classList.toggle('loading', mode === 'loading');
+      if (mode === 'hidden') {
+        el.style.opacity = '0';
+        el.style.transform = 'translate(-50%, -48px)';
+        container.style.transition = '';
+        container.style.transform = '';
+        return;
+      }
+      const shown = mode === 'loading' ? PULL_TRIGGER_PX : offset;
+      el.style.top = `${top}px`;
+      el.style.opacity = String(Math.min(1, shown / 40));
+      el.style.transform = `translate(-50%, ${Math.round(shown / 2) - 12}px)`;
+      container.style.transition = mode === 'pulling' || mode === 'armed' ? 'none' : '';
+      container.style.transform = mode === 'loading' ? '' : `translateY(${Math.round(shown * 0.6)}px)`;
+      text.textContent = mode === 'loading' ? 'Refreshing…' : mode === 'armed' ? 'Release to refresh' : `Pull to refresh · ${refreshedAgo().replace('Refresh', 'not loaded yet')}`;
+    }
+
+    function pullBlocked() {
+      return state.refreshing || document.body.getAttribute('data-auth') === 'locked' ||
+        document.querySelector('.drawer-backdrop.open') !== null || !document.getElementById('moreMenu').hidden;
+    }
+
+    window.addEventListener('touchstart', (e) => {
+      pullGesture = null;
+      if (e.touches.length !== 1 || window.scrollY > 0 || pullBlocked()) return;
+      pullGesture = { x: e.touches[0].clientX, y: e.touches[0].clientY, offset: 0, active: false };
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (!pullGesture) return;
+      const dx = e.touches[0].clientX - pullGesture.x;
+      const dy = e.touches[0].clientY - pullGesture.y;
+      if (!pullGesture.active) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        if (dy <= 0 || Math.abs(dx) > Math.abs(dy) || window.scrollY > 0) { pullGesture = null; return; }
+        pullGesture.active = true;
+      }
+      e.preventDefault();
+      pullGesture.offset = Math.min(120, dy * 0.5);
+      setPullIndicator(pullGesture.offset >= PULL_TRIGGER_PX ? 'armed' : 'pulling', pullGesture.offset);
+    }, { passive: false });
+
+    function endPull() {
+      const gesture = pullGesture;
+      pullGesture = null;
+      if (!gesture || !gesture.active) return;
+      if (gesture.offset >= PULL_TRIGGER_PX) syncSupabaseNow();
+      else setPullIndicator('hidden');
+    }
+    window.addEventListener('touchend', endPull);
+    window.addEventListener('touchcancel', endPull);
+
+    // Coming back to the portal after five minutes or more refreshes it.
+    const RETURN_REFRESH_MS = 5 * 60 * 1000;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || document.body.getAttribute('data-auth') === 'locked') return;
+      if (state.lastRefreshedAt && Date.now() - state.lastRefreshedAt >= RETURN_REFRESH_MS) syncSupabaseNow({ quiet: true });
+      else updateRefreshLabel();
+    });
+    setInterval(updateRefreshLabel, 30000);
+
+    // One tooltip for every [data-tip] mark: the mouse hovers it, a tap or keyboard focus shows it.
+    // The text is set with textContent, never as HTML.
+    let tipTarget = null;
+
+    function showTip(target, x, y) {
+      const tip = document.getElementById('chartTip');
+      if (tipTarget && tipTarget !== target) tipTarget.classList.remove('tip-on');
+      tipTarget = target;
+      target.classList.add('tip-on');
+      tip.textContent = target.getAttribute('data-tip');
+      tip.hidden = false;
+      const rect = target.getBoundingClientRect();
+      const px = x ?? rect.left + rect.width / 2;
+      const py = y ?? rect.top;
+      const w = tip.offsetWidth;
+      const h = tip.offsetHeight;
+      const left = Math.max(8, Math.min(window.innerWidth - w - 8, px - w / 2));
+      const above = py - h - 12;
+      tip.style.left = `${left}px`;
+      tip.style.top = `${above >= 8 ? above : Math.min(window.innerHeight - h - 8, (y ?? rect.bottom) + 16)}px`;
+    }
+
+    function hideTip() {
+      if (tipTarget) tipTarget.classList.remove('tip-on');
+      tipTarget = null;
+      document.getElementById('chartTip').hidden = true;
+    }
+
+    document.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse') return;
+      const target = e.target.closest ? e.target.closest('[data-tip]') : null;
+      if (target) showTip(target, e.clientX, e.clientY);
+      else if (tipTarget) hideTip();
+    });
+    document.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'mouse') return;
+      const target = e.target.closest ? e.target.closest('[data-tip]') : null;
+      if (target && target !== tipTarget) showTip(target);
+      else hideTip();
+    });
+    document.addEventListener('focusin', (e) => {
+      const target = e.target.closest ? e.target.closest('[data-tip]') : null;
+      if (target) showTip(target);
+    });
+    document.addEventListener('focusout', hideTip);
+    window.addEventListener('scroll', hideTip, { passive: true });
+
+    // A row that scrolls sideways fades at the edge that has more of it.
+    function updateScrollFade(el) {
+      const max = el.scrollWidth - el.clientWidth;
+      el.classList.toggle('fade-left', el.scrollLeft > 2);
+      el.classList.toggle('fade-right', el.scrollLeft < max - 2);
+    }
+    document.querySelectorAll('.scroll-fade').forEach(el => {
+      el.addEventListener('scroll', () => updateScrollFade(el), { passive: true });
+    });
+    window.addEventListener('resize', () => document.querySelectorAll('.scroll-fade').forEach(updateScrollFade));
+
+    // The tools menu: Edge Gate, Table Timeline, Live Stream, Lock.
+    function setMoreMenu(open) {
+      document.getElementById('moreMenu').hidden = !open;
+      document.getElementById('moreMenuBtn').setAttribute('aria-expanded', String(open));
+    }
+    document.getElementById('moreMenuBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      setMoreMenu(document.getElementById('moreMenu').hidden);
+    });
+    document.getElementById('moreMenu').addEventListener('click', (e) => {
+      if (e.target.closest('button')) setMoreMenu(false);
+    });
+    document.addEventListener('click', (e) => {
+      if (!document.getElementById('moreMenu').hidden && !e.target.closest('.menu-wrap')) setMoreMenu(false);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !document.getElementById('moreMenu').hidden) {
+        setMoreMenu(false);
+        document.getElementById('moreMenuBtn').focus();
+      }
+    });
 
     // Wire interactive controls
     document.querySelectorAll('#envSelector button').forEach(btn => {
@@ -4030,18 +4484,27 @@
 
     document.getElementById('versionSelect').addEventListener('change', (e) => {
       state.appVersion = e.target.value;
+      state.compareVersion = 'all';
       refreshActiveTab();
     });
 
-    document.getElementById('compareVersionSelect').addEventListener('change', (e) => {
+    document.addEventListener('change', (e) => {
+      if (e.target.id !== 'compareVersionSelect') return;
       state.compareVersion = e.target.value;
       refreshActiveTab();
     });
 
-    document.getElementById('windowSelect').addEventListener('change', (e) => {
-      state.windowHours = Number(e.target.value);
-      state.edgeSnapCache = null;
-      refreshActiveTab();
+    document.querySelectorAll('#windowSelector button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const hours = Number(btn.getAttribute('data-window'));
+        if (hours === state.windowHours) return;
+        state.windowHours = hours;
+        state.edgeSnapCache = null;
+        updateHeader();
+        document.getElementById('viewRoot').classList.add('refreshing');
+        await loadVersions();
+        await refreshActiveTab();
+      });
     });
 
     document.querySelectorAll('#navTabs .nav-tab').forEach(tab => {
@@ -4065,6 +4528,7 @@
     // Auto-detect Local Node Server vs Static/PWA Edge Gate Mode on startup
     async function initPortal() {
       syncEnvButtonsUI();
+      updateHeader();
       renderEdgeGateAuthPrompt();
       if (state.dataSource === 'auto') {
         try {
