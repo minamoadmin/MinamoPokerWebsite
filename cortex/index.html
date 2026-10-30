@@ -4526,7 +4526,7 @@
       const flowSeries = ECONOMY_SERIES.map(x => ({ label: x.label, color: x.color, values: seriesOf(x.flows) }))
         .filter(x => x.values.some(v => v !== 0));
       const flowTotal = names => names.reduce((a, name) => a + Number(flowOf(name)?.amount || 0), 0);
-      // Real money follows the platform where the server splits it by store (1.93.0 `byPlatform`; review 3
+      // Real money follows the platform where the server splits it by store (1.94.0 `byPlatform`; review 3
       // finding 7); the chip ledger records no device or version, so chips count every one.
       const store = (state.platform === 'ios' || state.platform === 'android') && e.money.byPlatform ? state.platform : null;
       const m = store ? { ...e.money, ...e.money.byPlatform[store] } : e.money;
@@ -4547,7 +4547,7 @@
       const byProduct = Array.from(products.values());
       const filterNote = state.platform === 'all' && state.appVersion === 'all' ? '' : [
         state.platform !== 'all' && store ? 'Real money below follows the platform: each receipt names its store.' : '',
-        state.platform !== 'all' && !store ? 'This backend sends real money for every platform together (MinamoPokerBE 1.93.0 splits it by store).' : '',
+        state.platform !== 'all' && !store ? 'This backend sends real money for every platform together; a newer backend splits it by store.' : '',
         'The chip ledger records no device or app version, so chips count every platform and version.',
         state.appVersion !== 'all' ? 'Receipts record no app version either.' : '',
       ].filter(Boolean).join(' ');
