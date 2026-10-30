@@ -2226,8 +2226,10 @@
     }
 
     // The window as buckets in the viewer's time zone, oldest first: hours for a window of two days or
-    // less, else days. One bucket more than the window holds, so the partial first hour or day keeps
-    // the rows the window reaches into it, and the last bucket holds now.
+    // less, else days. The first bucket holds the window's start (the partial first hour or day keeps
+    // the rows the window reaches into it) and the last holds now. Days run from the local day that
+    // holds the cutoff, so a daylight-saving change inside the window never leaves the cutoff before
+    // the first bucket (MinamoPokerBE cortex_window_buckets, the same rule).
     function chartTimeBuckets(windowHours, nowMs = Date.now()) {
       const hours = Math.max(1, Math.round(Number(windowHours) || 24));
       const starts = [];
@@ -2237,14 +2239,11 @@
         for (let i = hours; i >= 0; i--) starts.push(top.getTime() - i * 3600000);
         return { unit: 'hour', starts, end: top.getTime() + 3600000 };
       }
-      const days = Math.ceil(hours / 24);
       const today = new Date(nowMs);
       today.setHours(0, 0, 0, 0);
-      for (let i = days; i >= 0; i--) {
-        const day = new Date(today);
-        day.setDate(day.getDate() - i);
-        starts.push(day.getTime());
-      }
+      const day = new Date(nowMs - hours * 3600000);
+      day.setHours(0, 0, 0, 0);
+      for (; day.getTime() <= today.getTime(); day.setDate(day.getDate() + 1)) starts.push(day.getTime());
       const end = new Date(today);
       end.setDate(end.getDate() + 1);
       return { unit: 'day', starts, end: end.getTime() };
