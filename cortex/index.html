@@ -2066,6 +2066,7 @@
         testTraffic: state.includeTest ? { included: true, hiddenSessions: 0 } : { included: false, hiddenSessions: Number(ss.hiddenSessions) || 0 },
         activity: { buckets: act.buckets, ...ss.series },
         source: act.source,
+        sourceError: act.sourceError || '',
       };
     }
 
@@ -2239,14 +2240,14 @@
         for (let i = hours; i >= 0; i--) starts.push(top.getTime() - i * 3600000);
         return { unit: 'hour', starts, end: top.getTime() + 3600000 };
       }
+      // Each day from its own date (review 3 finding 10): stepping one Date carried the 01:00 of a day
+      // with no midnight (Havana, Santiago, the Azores) into every later day and dropped today.
+      const first = new Date(nowMs - hours * 3600000);
       const today = new Date(nowMs);
-      today.setHours(0, 0, 0, 0);
-      const day = new Date(nowMs - hours * 3600000);
-      day.setHours(0, 0, 0, 0);
-      for (; day.getTime() <= today.getTime(); day.setDate(day.getDate() + 1)) starts.push(day.getTime());
-      const end = new Date(today);
-      end.setDate(end.getDate() + 1);
-      return { unit: 'day', starts, end: end.getTime() };
+      const days = Math.round((Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+        - Date.UTC(first.getFullYear(), first.getMonth(), first.getDate())) / 86400000);
+      for (let i = 0; i <= days; i++) starts.push(new Date(first.getFullYear(), first.getMonth(), first.getDate() + i).getTime());
+      return { unit: 'day', starts, end: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime() };
     }
 
     // The bucket holding a time, or -1 outside the buckets.
@@ -2978,8 +2979,7 @@
     function demoTotals(flows, players, newAccounts) {
       let created = 0;
       let removed = 0;
-      for (const [flow, values] of Object.entries(flows)) {
-        if (flow === 'transfer') continue;
+      for (const values of Object.values(flows)) {
         const total = demoSum(values);
         if (total > 0) created += total;
         else removed -= total;
@@ -3015,8 +3015,15 @@
       const android = packs(androidCount, 330);
       const purchases = demoSum(iosCount) + demoSum(androidCount);
       const revenueUsd = Math.round((demoSum(ios) + demoSum(android)) * 100) / 100;
-      const beforeCount = demoSeries(before, 5, 0.5, 35, 0.15);
-      const previousRevenue = Math.round(demoSum(packs(beforeCount, 350)) * 100) / 100;
+      const usd = (values) => Math.round(demoSum(values) * 100) / 100;
+      const store = (count, values) => ({
+        purchases: demoSum(count), buyers: Math.round(demoSum(count) * 0.8), grossUsd: usd(values),
+        refunds: 0, refundedUsd: 0, revenueUsd: usd(values),
+      });
+      const beforeIos = demoSeries(before, 3, 0.5, 35, 0.15);
+      const beforeAndroid = demoSeries(before, 2, 0.5, 37, 0.12);
+      const beforeCount = beforeIos.map((v, i) => v + beforeAndroid[i]);
+      const previousRevenue = Math.round((usd(packs(beforeIos, 350)) + usd(packs(beforeAndroid, 370))) * 100) / 100;
       return {
         version: 1,
         windowHours: hours,
@@ -3043,12 +3050,12 @@
           refundedUsd: 0,
           revenueUsd,
           hiddenTestPurchases: options.includeTest ? 0 : 3,
-          byProduct: DEMO_PRODUCTS.map(([productId, name, priceUsd]) => {
-            const n = [...iosCount.map((c, i) => [c, 310 + i * 13]), ...androidCount.map((c, i) => [c, 330 + i * 13])]
-              .reduce((a, [c, seed]) => a + Array.from({ length: c }, (_, k) => DEMO_PRODUCTS[Math.floor(demoRandom(seed + k)() * DEMO_PRODUCTS.length)][0])
-                .filter((id) => id === productId).length, 0);
-            return { productId, name, priceUsd, purchases: n, buyers: Math.max(1, Math.round(n * 0.8)), revenueUsd: Math.round(n * priceUsd * 100) / 100 };
-          }).filter((p) => p.purchases > 0),
+          byProduct: DEMO_PRODUCTS.flatMap(([productId, name, priceUsd]) => [['ios', iosCount, 310], ['android', androidCount, 330]].map(([platform, counts, base]) => {
+            const n = counts.reduce((a, c, i) => a + Array.from({ length: c }, (_, k) => DEMO_PRODUCTS[Math.floor(demoRandom(base + i * 13 + k)() * DEMO_PRODUCTS.length)][0])
+              .filter((id) => id === productId).length, 0);
+            return { productId, name, priceUsd, platform, purchases: n, buyers: Math.max(1, Math.round(n * 0.8)), revenueUsd: Math.round(n * priceUsd * 100) / 100 };
+          })).filter((p) => p.purchases > 0),
+          byPlatform: { ios: store(iosCount, ios), android: store(androidCount, android) },
           series: { ios, android, purchases: iosCount.map((v, i) => v + androidCount[i]) },
         },
         tokens: [
@@ -3078,6 +3085,10 @@
           purchases: demoSum(beforeCount),
           buyers: Math.round(demoSum(beforeCount) * 0.7),
           revenueUsd: previousRevenue,
+          byPlatform: {
+            ios: { purchases: demoSum(beforeIos), buyers: Math.round(demoSum(beforeIos) * 0.8), revenueUsd: usd(packs(beforeIos, 350)) },
+            android: { purchases: demoSum(beforeAndroid), buyers: Math.round(demoSum(beforeAndroid) * 0.8), revenueUsd: usd(packs(beforeAndroid, 370)) },
+          },
         },
       };
     }
@@ -3322,6 +3333,7 @@
         handSeries: { buckets: act.buckets, ...(e.handSeries || { casual: [], ranked: [], tourney: [] }) },
         queueEventsTruncated: Boolean(e.queueEventsTruncated),
         source: act.source,
+        sourceError: act.sourceError || '',
       };
     }
 
@@ -3337,6 +3349,7 @@
           errorRatePct: Number(sp.count) > 0 ? Number(((Number(sp.errors) / Number(sp.count)) * 100).toFixed(2)) : 0,
         })),
         source: act.source,
+        sourceError: act.sourceError || '',
       };
     }
 
@@ -3688,7 +3701,8 @@
       }
     }
     // The Economy and Games tabs' server totals (cortex-admin `economy` and `play`, MinamoPokerBE 1.89.0),
-    // cached like the activity; null from a backend without the action (it answers 400).
+    // cached like the activity: { totals }, { missing } from a backend without the action (a 400 naming
+    // it unsupported), or { error }.
     async function fetchEdgeTotals(action) {
       if (!state.ownerKey) return null;
       const params = new URLSearchParams({
@@ -3708,18 +3722,22 @@
           },
         });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok || !body[action] || !body[action].buckets) return null;
-        if (!state.edgeTotalsCache) state.edgeTotalsCache = new Map();
-        state.edgeTotalsCache.set(params, body[action]);
-        return body[action];
-      } catch {
-        return null;
+        if (res.ok && body[action] && body[action].buckets) {
+          if (!state.edgeTotalsCache) state.edgeTotalsCache = new Map();
+          state.edgeTotalsCache.set(params, { totals: body[action] });
+          return { totals: body[action] };
+        }
+        if (res.status === 400 && /Unsupported/.test(String(body.error || ''))) return { missing: true };
+        return { error: body.error || `cortex-admin answered ${res.status}` };
+      } catch (err) {
+        return { error: err && err.message ? err.message : String(err) };
       }
     }
 
     // The Economy or Games totals for the tab and where they came from: the server's, the demo's, or
     // why there are none ('backend': the backend has no such action yet; 'key': the local server has
-    // no service key for this environment).
+    // no key for this environment; 'unreachable': the project or the local server failed, with its
+    // `error`). Never throws, so a failure shows on the tab instead of leaving the last window there.
     async function tabTotals(tab) {
       const kind = tab === 'economy' ? 'economy' : 'play';
       const demoOptions = { windowHours: state.windowHours, timeZone: viewerTimeZone(), includeTest: state.includeTest, environment: state.environment };
@@ -3727,14 +3745,23 @@
         return { totals: kind === 'economy' ? demoEconomy(demoOptions) : demoPlay(demoOptions), source: 'demo' };
       }
       if (state.dataSource === 'edge') {
-        const totals = await fetchEdgeTotals(kind);
-        return totals ? { totals, source: 'server' } : { totals: null, source: 'backend' };
+        const answer = await fetchEdgeTotals(kind);
+        if (answer && answer.totals) return { totals: answer.totals, source: 'server' };
+        if (answer && answer.missing) return { totals: null, source: 'backend' };
+        return { totals: null, source: 'unreachable', error: (answer && answer.error) || '' };
       }
-      const res = await fetch(`/api/${kind}?${queryStr()}&timeZone=${encodeURIComponent(viewerTimeZone())}`);
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `Cortex answered ${res.status}`);
-      if (!body.ok) return { totals: null, source: body.reason === 'no_key' ? 'key' : 'backend' };
-      return { totals: body[kind], source: 'server' };
+      try {
+        const res = await fetch(`/api/${kind}?${queryStr()}&timeZone=${encodeURIComponent(viewerTimeZone())}`);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) return { totals: null, source: 'unreachable', error: body.error || `Cortex answered ${res.status}` };
+        if (!body.ok) {
+          const source = { no_key: 'key', no_function: 'backend' }[body.reason] || 'unreachable';
+          return { totals: null, source, error: body.error || '' };
+        }
+        return { totals: body[kind], source: 'server' };
+      } catch (err) {
+        return { totals: null, source: 'unreachable', error: err && err.message ? err.message : String(err) };
+      }
     }
 
     const TAB_RENDERERS = {
@@ -3804,7 +3831,7 @@
             if (tab === 'economy' || tab === 'games') {
               const totals = await tabTotals(tab);
               if (!current()) return;
-              data = { ...data, totals: totals.totals, totalsSource: totals.source };
+              data = { ...data, totals: totals.totals, totalsSource: totals.source, totalsError: totals.error || '' };
             }
           } else if (tab === 'triage') data = { issues };
           else data = { reports };
@@ -3829,19 +3856,23 @@
           const body = await res.json();
           if (!current()) return;
           if (!res.ok || !body.activity) throw new Error(body.error || `Cortex answered ${res.status}`);
-          const act = { ...body.activity, source: body.source };
+          const act = { ...body.activity, source: body.source, sourceError: body.error || '' };
           if (tab === 'pulse') data = pulseFromActivity(act, { issues: triage.issues || [], error_events: [], bug_reports: inbox.reports || [] });
           else if (tab === 'vitals') data = vitalsFromActivity(act);
           else data = radarFromActivity(act, body.newPlayers);
           if (tab === 'economy' || tab === 'games') {
             const totals = await tabTotals(tab);
             if (!current()) return;
-            data = { ...data, totals: totals.totals, totalsSource: totals.source };
+            data = { ...data, totals: totals.totals, totalsSource: totals.source, totalsError: totals.error || '' };
           }
         } else if (tab === 'triage') data = triage;
         else data = inbox;
         TAB_RENDERERS[tab](root, data);
         state.lastRefreshedAt = Date.now();
+      } catch (err) {
+        if (current()) {
+          root.innerHTML = panelCard('Could not load this tab', `${err && err.message ? err.message : String(err)}. Refresh to try again.`, '');
+        }
       } finally {
         if (current()) {
           root.classList.remove('refreshing');
@@ -3914,12 +3945,15 @@
     }
 
     // A line above the charts when the totals were counted from rows rather than by the server.
-    function totalsNote(source) {
+    function totalsNote(source, error = '') {
       if (source === 'rows') {
         return `<div class="totals-note">Counted from the newest snapshot rows only: this backend has no server totals yet (MinamoPokerBE 1.85.0), so a long window comes up short.</div>`;
       }
+      if (source === 'local' && error) {
+        return `<div class="totals-note">Could not reach the project (${escapeHtml(error)}), so these are counted from the rows this server has synced. Refresh to try again.</div>`;
+      }
       if (source === 'local') {
-        return `<div class="totals-note">Counted from the rows this server has synced. Add this environment's service key to MinamoCortex/.env for the server's own totals.</div>`;
+        return `<div class="totals-note">Counted from the rows this server has synced. Add this environment's service key, or the portal's owner key, to MinamoCortex/.env for the server's own totals.</div>`;
       }
       return '';
     }
@@ -4004,7 +4038,7 @@
       ) : '';
 
       root.innerHTML = `
-        ${totalsNote(data.source)}
+        ${totalsNote(data.source, data.sourceError)}
         ${s.totalSessions === 0 && state.environment !== 'demo' ? `
           <div class="panel-card" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
             <div>
@@ -4093,6 +4127,26 @@
       return buckets;
     }
 
+    // The last 7 days and the 7 before them as rolling 168-hour windows, so the change compares two
+    // windows of the same length (review 3 finding 9: today's part day plus six against seven full
+    // days read as a drop every morning). The platform filter applies, as for the days.
+    function newPlayersRolling(rows, nowMs = Date.now()) {
+      const week = 7 * 24 * 3600 * 1000;
+      const out = { ios: 0, android: 0, total: 0, previous: 0 };
+      for (const r of rows || []) {
+        if (state.platform !== 'all' && r.platform !== state.platform) continue;
+        const t = Date.parse(r.created_at);
+        if (!Number.isFinite(t) || t > nowMs) continue;
+        if (t >= nowMs - week) {
+          out.total++;
+          if (r.platform === 'ios' || r.platform === 'android') out[r.platform]++;
+        } else if (t >= nowMs - 2 * week) {
+          out.previous++;
+        }
+      }
+      return out;
+    }
+
     function newPlayersDayLabel(bucket) {
       if (bucket.offset === 0) return 'Today';
       if (bucket.offset === 1) return 'Yesterday';
@@ -4121,8 +4175,7 @@
         `;
       }
       const today = days[0];
-      const week = days.slice(0, 7).reduce((a, b) => ({ ios: a.ios + b.ios, android: a.android + b.android, total: a.total + b.total }), { ios: 0, android: 0, total: 0 });
-      const weekBefore = days.slice(7, 14).reduce((a, b) => a + b.total, 0);
+      const week = newPlayersRolling(rows);
       const share = (n, total) => total > 0 ? `${Math.round((n / total) * 100)}%` : '–';
       // The chart runs oldest to newest; its buckets are the same local days.
       const oldestFirst = days.slice().reverse();
@@ -4142,7 +4195,7 @@
             ${statTile({ label: 'Today · iOS', value: today.ios, sub: `${share(today.ios, today.total)} of today's new players`, swatch: CHART_COLORS.ios })}
             ${statTile({ label: 'Today · Android', value: today.android, sub: `${share(today.android, today.total)} of today's new players`, swatch: CHART_COLORS.android })}
             ${statTile({ label: 'Today · All', value: today.total, sub: `${today.unknown} unknown platform · ${today.linked} linked Apple/Google` })}
-            ${statTile({ label: 'Last 7 days', value: week.total, delta: chartDeltaBadge(chartDelta(week.total, weekBefore, { before: 'the 7 days before' })), sub: `iOS ${week.ios} · Android ${week.android}` })}
+            ${statTile({ label: 'Last 7 days', value: week.total, delta: chartDeltaBadge(chartDelta(week.total, week.previous, { before: 'the 7 days before' })), sub: `iOS ${week.ios} · Android ${week.android} · the last 168 hours` })}
           </div>
           ${chartColumns({ buckets, series, height: 140, emptyText: 'No new players in the last 14 days' })}
           ${chartLegend(series)}
@@ -4167,7 +4220,7 @@
         .sort((a, b) => EXPRESSION_SET_ORDER.indexOf(a.setKey) - EXPRESSION_SET_ORDER.indexOf(b.setKey));
 
       root.innerHTML = `
-        ${totalsNote(data.source)}
+        ${totalsNote(data.source, data.sourceError)}
         ${renderNewPlayersCard(data.newPlayers)}
 
         <div class="grid-2">
@@ -4207,10 +4260,12 @@
 
     // Why a tab has no server totals: the backend has no such action yet, or the local server has no
     // service key for the environment (it syncs neither the ledger nor the hand tables).
-    function totalsMissingCard(source, what) {
+    function totalsMissingCard(source, what, error = '') {
       const text = source === 'key'
         ? `Add this environment's service key, or the portal's owner key, to MinamoCortex/.env: the local server asks the project for its ${what} totals and does not sync the tables they come from.`
-        : `This backend has no ${what} totals yet (MinamoPokerBE 1.89.0). Staging has them; production gets them with the release.`;
+        : source === 'unreachable'
+          ? `Could not load the ${what} totals${error ? ` (${error})` : ''}. Refresh to try again.`
+          : `This backend has no ${what} totals yet (MinamoPokerBE 1.89.0). Staging has them; production gets them with the release.`;
       return `<div class="totals-note">${escapeHtml(text)}</div>`;
     }
 
@@ -4288,8 +4343,8 @@
 
       if (!p) {
         root.innerHTML = `
-          ${totalsNote(data.source)}
-          ${totalsMissingCard(data.totalsSource, 'games')}
+          ${totalsNote(data.source, data.sourceError)}
+          ${totalsMissingCard(data.totalsSource, 'games', data.totalsError)}
           <div class="kpi-grid">
             ${statTile({ label: 'Hands played', value: insights.totalHandsCompleted || 0, sub: capitalize(windowLabel()), spark: chartSparkline(handTotals) })}
           </div>
@@ -4324,8 +4379,13 @@
       const listRow = r => [r.username || String(r.userId).slice(0, 8), chartDuration(r.tableSec), r.games, r.hands, chartSigned(r.netChips)];
       const moneyRow = r => [r.username || String(r.userId).slice(0, 8), chartSigned(r.netChips), chartSigned(r.casual), chartSigned(r.ranked), chartSigned(r.tourney)];
 
+      const filterNote = state.platform !== 'all' || state.appVersion !== 'all'
+        ? '<div class="totals-note">Games, hands and players count every platform and app version: the game tables record no device. The hands-per-hour chart and the queue tiles follow the filter.</div>'
+        : '';
+
       root.innerHTML = `
-        ${totalsNote(data.source)}
+        ${totalsNote(data.source, data.sourceError)}
+        ${filterNote}
         <div class="kpi-grid">
           ${statTile({ label: 'Games played', value: games, delta: deltaBadge(games, prev.games), sub: PLAY_MODES.map(m => `${MODE_LABELS[m]} ${p.games[m].games}`).join(' · '), spark: chartSparkline(gameTotals) })}
           ${statTile({ label: 'Hands played', value: playerHands, delta: deltaBadge(playerHands, prev.playerHands), sub: 'Each player’s hands, every mode', spark: chartSparkline(p.series.hands) })}
@@ -4422,7 +4482,7 @@
       { key: 'ranked', label: 'Ranked tables', color: CHART_COLORS.ranked, flows: ['ranked'] },
       { key: 'tourney', label: 'Tourneys', color: CHART_COLORS.tourney, flows: ['tourney'] },
       { key: 'store', label: 'Store', color: CHART_SERIES[7], flows: ['store_skins', 'store_sets', 'store_parts', 'store_collections'] },
-      { key: 'other', label: 'Other', color: CHART_COLORS.other, flows: ['other'] },
+      { key: 'other', label: 'Merged guests and other', color: CHART_COLORS.other, flows: ['transfer', 'other'] },
     ];
     const STORE_KINDS = [
       { key: 'skins', label: 'Frames and tables', flow: 'store_skins' },
@@ -4454,7 +4514,7 @@
       `;
       const e = data.totals;
       if (!e) {
-        root.innerHTML = `${totalsNote(data.source)}${totalsMissingCard(data.totalsSource, 'economy')}${storeEvents}`;
+        root.innerHTML = `${totalsNote(data.source, data.sourceError)}${totalsMissingCard(data.totalsSource, 'economy', data.totalsError)}${storeEvents}`;
         return;
       }
 
@@ -4466,12 +4526,31 @@
       const flowSeries = ECONOMY_SERIES.map(x => ({ label: x.label, color: x.color, values: seriesOf(x.flows) }))
         .filter(x => x.values.some(v => v !== 0));
       const flowTotal = names => names.reduce((a, name) => a + Number(flowOf(name)?.amount || 0), 0);
-      const transfer = flowTotal(['transfer']);
-      const m = e.money;
+      // Real money follows the platform where the server splits it by store (1.93.0 `byPlatform`; review 3
+      // finding 7); the chip ledger records no device or version, so chips count every one.
+      const store = (state.platform === 'ios' || state.platform === 'android') && e.money.byPlatform ? state.platform : null;
+      const m = store ? { ...e.money, ...e.money.byPlatform[store] } : e.money;
+      const moneyPrev = store ? ((prev.byPlatform || {})[store] || {}) : prev;
       const moneySeries = [
-        { label: 'iOS', color: CHART_COLORS.ios, values: m.series.ios.map(Number) },
-        { label: 'Android', color: CHART_COLORS.android, values: m.series.android.map(Number) },
-      ];
+        { key: 'ios', label: 'iOS', color: CHART_COLORS.ios, values: e.money.series.ios.map(Number) },
+        { key: 'android', label: 'Android', color: CHART_COLORS.android, values: e.money.series.android.map(Number) },
+      ].filter(x => !store || x.key === store);
+      const products = new Map();
+      for (const x of e.money.byProduct || []) {
+        if (store && x.platform && x.platform !== store) continue;
+        const row = products.get(x.productId) || { ...x, purchases: 0, buyers: 0, revenueUsd: 0 };
+        row.purchases += Number(x.purchases) || 0;
+        row.buyers += Number(x.buyers) || 0;
+        row.revenueUsd = Math.round((Number(row.revenueUsd) + Number(x.revenueUsd || 0)) * 100) / 100;
+        products.set(x.productId, row);
+      }
+      const byProduct = Array.from(products.values());
+      const filterNote = state.platform === 'all' && state.appVersion === 'all' ? '' : [
+        state.platform !== 'all' && store ? 'Real money below follows the platform: each receipt names its store.' : '',
+        state.platform !== 'all' && !store ? 'This backend sends real money for every platform together (MinamoPokerBE 1.93.0 splits it by store).' : '',
+        'The chip ledger records no device or app version, so chips count every platform and version.',
+        state.appVersion !== 'all' ? 'Receipts record no app version either.' : '',
+      ].filter(Boolean).join(' ');
       const kinds = STORE_KINDS.map((k, i) => ({ label: k.label, value: -flowTotal([k.flow]), color: CHART_SERIES[i] }));
       const tokenTypes = Array.from(new Set((e.tokens || []).map(x => x.tokenType))).sort();
       const tokenRows = tokenTypes.map(type => {
@@ -4490,27 +4569,27 @@
       const payingShare = e.totals.activePlayers > 0 ? `${Math.round((m.buyers / e.totals.activePlayers) * 1000) / 10}%` : '–';
 
       root.innerHTML = `
-        ${totalsNote(data.source)}
-        ${state.platform !== 'all' ? '<div class="totals-note">Chips are counted on every platform (a player’s ledger has none); the platform picks only the purchases’ store below.</div>' : ''}
+        ${totalsNote(data.source, data.sourceError)}
+        ${filterNote ? `<div class="totals-note">${escapeHtml(filterNote)}</div>` : ''}
         <div class="kpi-grid">
           ${statTile({ label: 'Chips created', value: chartCompact(e.totals.created), delta: deltaBadge(e.totals.created, prev.created, { better: null }), sub: 'Spins, bought chips, sign-ups, bonuses, grants, and what players won at tables' })}
           ${statTile({ label: 'Chips removed', value: chartCompact(e.totals.removed), delta: deltaBadge(e.totals.removed, prev.removed, { better: null }), sub: 'The store, and what players lost at tables' })}
           ${statTile({ label: 'Players’ chips, net', value: chartSigned(e.totals.net), delta: deltaBadge(e.totals.net, prev.net, { better: null }), sub: `${e.totals.activePlayers} player${e.totals.activePlayers === 1 ? '' : 's'} moved chips · ${e.totals.newAccounts} new account${e.totals.newAccounts === 1 ? '' : 's'}` })}
-          ${statTile({ label: 'Revenue at list price', value: chartUsd(m.revenueUsd), delta: deltaBadge(Number(m.revenueUsd), prev.revenueUsd, { kind: 'usd' }), sub: `${m.purchases} purchase${m.purchases === 1 ? '' : 's'} · ${m.buyers} paying player${m.buyers === 1 ? '' : 's'}` })}
+          ${statTile({ label: 'Revenue at list price', value: chartUsd(m.revenueUsd), delta: deltaBadge(Number(m.revenueUsd), moneyPrev.revenueUsd, { kind: 'usd' }), sub: `${m.purchases} purchase${m.purchases === 1 ? '' : 's'} · ${m.buyers} paying player${m.buyers === 1 ? '' : 's'}` })}
         </div>
 
-        ${panelCard('Where chips came from and went', `Per ${per}, ${windowLabel()}, in your time zone: above zero what was created, below what was removed; the tick is the net. Table rows net to what real players won or lost there; a seat still open counts its buy-in until it ends.${transfer ? ` Merged guests’ balances (${chartCompact(transfer)}) are left out.` : ''}`, `
+        ${panelCard('Where chips came from and went', `Per ${per}, ${windowLabel()}, in your time zone: above zero what was created, below what was removed; the tick is the net. Table rows net to what real players won or lost there; a seat still open counts its buy-in until it ends. A guest who links an account arrives as one row: the link deletes the guest’s own history.`, `
           ${chartDiverging({ buckets: e.buckets, series: flowSeries, height: 200, emptyText: `No chips moved in the ${windowLabel()}` })}
           ${chartLegend(flowSeries)}
           ${chartDataTable(['When', ...flowSeries.map(x => x.label), 'Net'], bucketRows(e.buckets, [...flowSeries.map(x => x.values), e.buckets.starts.map((_, i) => flowSeries.reduce((a, x) => a + Number(x.values[i] || 0), 0))]))}
         `)}
 
         <div class="grid-2">
-          ${panelCard('Real money', `List price in USD before Apple’s and Google’s fees (no currency or fee is stored). Paying players: ${m.buyers} of the ${e.totals.activePlayers} who moved chips (${payingShare}).`, `
+          ${panelCard('Real money', `List price in USD before Apple’s and Google’s fees (no currency or fee is stored). Paying players: ${m.buyers} of the ${e.totals.activePlayers} who moved chips (${payingShare}). A purchase leaves these totals when its account is merged or deleted: the receipt goes with the account.`, `
             ${chartColumns({ buckets: e.buckets, series: moneySeries, emptyText: `No purchases in the ${windowLabel()}`, unitLabel: 'USD' })}
             ${chartLegend(moneySeries)}
             <div class="chart-subhead">By chip pack</div>
-            ${chartHBars((m.byProduct || []).map(x => ({
+            ${chartHBars(byProduct.map(x => ({
               label: `${x.name} · ${chartUsd(x.priceUsd)}`,
               value: Number(x.revenueUsd),
               valueText: `${chartUsd(x.revenueUsd)} · ${x.purchases} bought`,
@@ -4518,7 +4597,7 @@
               color: CHART_COLORS.accent,
             })), { emptyText: 'No chip packs bought in this window' })}
             <div class="kpi-sub" style="margin-top:8px;">${m.refunds ? `${m.refunds} refunded (${escapeHtml(chartUsd(m.refundedUsd))}), taken out. ` : ''}${m.hiddenTestPurchases ? `${m.hiddenTestPurchases} sandbox, TestFlight, Xcode or team purchase${m.hiddenTestPurchases === 1 ? '' : 's'} hidden.` : ''}</div>
-            ${chartDataTable(['When', 'iOS', 'Android', 'Purchases'], bucketRows(e.buckets, [moneySeries[0].values.map(chartUsd), moneySeries[1].values.map(chartUsd), m.series.purchases]))}
+            ${chartDataTable(['When', ...moneySeries.map(x => x.label), 'Purchases, every store'], bucketRows(e.buckets, [...moneySeries.map(x => x.values.map(chartUsd)), e.money.series.purchases]))}
           `)}
           ${panelCard('Store spending', `${chartCompact(e.store.spent)} chips in ${e.store.purchases} purchase${e.store.purchases === 1 ? '' : 's'} by ${e.store.buyers} player${e.store.buyers === 1 ? '' : 's'}.`, `
             ${chartShareBar(kinds, { emptyText: 'Nothing bought in this window' })}
@@ -4610,7 +4689,7 @@
 
     function renderVitals(root, data) {
       const spans = data.spans || [];
-      root.innerHTML = totalsNote(data.source) + panelCard(
+      root.innerHTML = totalsNote(data.source, data.sourceError) + panelCard(
         'Latency',
         `Per operation, ${windowLabel()}: the bar runs from p50 to p95, the dot is p50 and the tick p99, on one log scale. Cold start, preload, RPCs, edge functions and realtime.`,
         chartRanges(spans.map(sp => ({ label: sp.name, p50Ms: sp.p50Ms, p95Ms: sp.p95Ms, p99Ms: sp.p99Ms, count: sp.count, errorRatePct: sp.errorRatePct })))
