@@ -880,6 +880,22 @@
     .chart-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
     .chart-key strong { color: var(--text); font-weight: 700; }
     .chart-key em { font-style: normal; color: var(--muted); }
+    .kpi-delta { margin: 2px 0 6px; }
+    .chart-dcol { position: relative; display: block; }
+    .chart-dcol .chart-stack { position: absolute; left: 50%; transform: translateX(-50%); }
+    .chart-down .chart-seg:first-child { border-radius: 0; }
+    .chart-down .chart-seg:last-child { border-radius: 0 0 4px 4px; }
+    .chart-net { position: absolute; left: 50%; width: min(30px, 86%); height: 2px; transform: translate(-50%, 50%); background: var(--text); border-radius: 1px; pointer-events: none; }
+    .chart-gridline.chart-zero { border-top-color: var(--muted); }
+    .chart-binlabels { display: flex; margin: 6px 0 0 34px; gap: 2px; }
+    .chart-binlabels span { flex: 1 1 0; min-width: 0; text-align: center; font-size: 10px; line-height: 1.25; color: var(--muted); overflow-wrap: anywhere; }
+    .chart-subhead { font-size: 12px; font-weight: 700; color: var(--text-secondary); margin: 16px 0 8px; }
+    .chart-subhead:first-child { margin-top: 0; }
+    .mini-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .mini-table th { text-align: left; font-weight: 600; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .mini-table td { padding: 7px 8px; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); }
+    .mini-table td.num, .mini-table th.num { text-align: right; }
+    .mini-table td.name { color: var(--text); font-weight: 600; }
     .chart-empty { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; border: 1px dashed var(--border); border-radius: 10px; }
     .chart-hbars { display: flex; flex-direction: column; gap: 12px; }
     .hbar { border-radius: 6px; outline-offset: 3px; }
@@ -1202,6 +1218,7 @@
       ownerKey: localStorage.getItem('cortex_owner_key') || '',
       edgeSnapCache: null,
       edgeActivityCache: null,
+      edgeTotalsCache: null,
       edgeSnapEnv: null,
       edgeLastError: null,
       demoKeyVerified: false,
@@ -1696,6 +1713,10 @@
         bug_reports: keep(snap.bug_reports, true),
         new_players: (snap.new_players || []).filter(r => state.includeTest || !HIDDEN_TRAFFIC_CLASSES.includes(r.traffic_class)),
         test_traffic: { included: state.includeTest, hidden_sessions: windowSessions.length - sessions.length },
+        previous_sessions: cutoff == null ? [] : keep((snap.sessions || []).filter(r => {
+          const t = Date.parse(r.started_at);
+          return t >= cutoff - state.windowHours * 3600 * 1000 && t < cutoff;
+        })),
       };
     }
 
@@ -1714,6 +1735,7 @@
       localStorage.setItem(`cortex_include_test_${state.environment}`, String(includeTest));
       state.edgeSnapCache = null;
       state.edgeActivityCache = null;
+      state.edgeTotalsCache = null;
       syncEnvButtonsUI();
       await loadVersions();
       await refreshActiveTab();
@@ -1727,6 +1749,7 @@
       state.compareVersion = 'all';
       state.edgeSnapCache = null;
       state.edgeActivityCache = null;
+      state.edgeTotalsCache = null;
       state.edgeLastError = null;
       syncEnvButtonsUI();
       updateHeader();
@@ -2011,7 +2034,20 @@
         });
       }
 
+      // The window before, the same numbers (plan D2); null when the totals do not reach back.
+      const ps = act.previous && act.previous.sessions;
+      const prevSessions = ps ? Number(ps.total) || 0 : 0;
+      const prevPlayers = ps ? Number(ps.players) || 0 : 0;
+      const previousSummary = ps ? {
+        activeUsers: prevPlayers,
+        totalSessions: prevSessions,
+        avgSessionSec: prevSessions > 0 ? Math.round(Number(ps.durationMsSum) / prevSessions / 1000) : 0,
+        crashFreeSessionsPct: prevSessions > 0 ? Number((((prevSessions - Number(ps.crashed || 0)) / prevSessions) * 100).toFixed(2)) : null,
+        crashFreeUsersPct: prevPlayers > 0 ? Number((((prevPlayers - Number(ps.crashedPlayers || 0)) / prevPlayers) * 100).toFixed(2)) : null,
+      } : null;
+
       return {
+        previousSummary,
         summary: {
           totalSessions,
           crashedSessions,
@@ -2426,6 +2462,140 @@
       </svg>`;
     }
 
+    // Phases 3 and 4 (2026-10-30): money, signed amounts, the change against the window before, columns
+    // above and below zero, and histograms.
+
+    // A list price in USD: "$4.99", "$1,284", "$12.3K"; a negative amount as "−$5".
+    function chartUsd(n) {
+      const v = Number(n) || 0;
+      const a = Math.abs(v);
+      const text = a >= 10000 ? chartCompact(a) : a.toLocaleString('en-US', { minimumFractionDigits: a % 1 ? 2 : 0, maximumFractionDigits: 2 });
+      return `${v < 0 ? '−' : ''}$${text}`;
+    }
+
+    // An amount with its sign: "+1.2K", "−300", "0".
+    function chartSigned(n) {
+      const v = Number(n) || 0;
+      if (v === 0) return '0';
+      return `${v > 0 ? '+' : '−'}${chartCompact(Math.abs(v))}`;
+    }
+
+    // 3600 seconds as "1h", 5400 as "1h 30m", 120 as "2m", 45 as "45s".
+    function chartDurationShort(seconds) {
+      const s = Math.max(0, Math.round(Number(seconds) || 0));
+      if (s >= 3600 && s % 3600 === 0) return `${s / 3600}h`;
+      if (s >= 60 && s < 3600 && s % 60 === 0) return `${s / 60}m`;
+      return chartDuration(s);
+    }
+
+    // The change of a headline against the window before of the same length (plan D2): an absolute
+    // difference, never a percentage, so a small count reads "+1" and not "+100%". kind: count, pct (a
+    // rate in points), duration (seconds), usd. better: 'up', 'down' or null (neither is good). Null
+    // when the window before is unknown.
+    function chartDelta(current, previous, { kind = 'count', before = 'the window before', better = 'up' } = {}) {
+      if (previous == null || current == null || !Number.isFinite(Number(previous)) || !Number.isFinite(Number(current))) return null;
+      const diff = Math.round((Number(current) - Number(previous)) * 100) / 100;
+      if (diff === 0) return { text: `same as ${before}`, tone: 'neutral' };
+      const sign = diff > 0 ? '+' : '−';
+      const a = Math.abs(diff);
+      const amount = kind === 'pct' ? `${chartTrim(a)} pts`
+        : kind === 'duration' ? chartDuration(a)
+          : kind === 'usd' ? chartUsd(a)
+            : chartCompact(a);
+      const tone = better === null ? 'neutral' : (diff > 0) === (better === 'up') ? 'good' : 'bad';
+      return { text: `${sign}${amount} vs ${before}`, tone };
+    }
+
+    // The change as a badge (text in its tone; the sign and the words carry it, not the colour).
+    function chartDeltaBadge(delta) {
+      return delta ? `<span class="delta-badge ${chartEscape(delta.tone)}">${chartEscape(delta.text)}</span>` : '';
+    }
+
+    // Columns above and below zero per bucket. Each series stacks its positive values up from the zero
+    // line and its negative values down (series[0] nearest the line); a tick marks the net. One hit
+    // target per column, whose tooltip lists every series that moved and the net.
+    function chartDiverging({ buckets, series, height = 180, emptyText = 'Nothing in this window', format = chartSigned }) {
+      const n = buckets.starts.length;
+      const val = (s, i) => Number(s.values[i]) || 0;
+      const ups = Array.from({ length: n }, (_, i) => series.reduce((a, s) => a + Math.max(0, val(s, i)), 0));
+      const downs = Array.from({ length: n }, (_, i) => series.reduce((a, s) => a + Math.max(0, -val(s, i)), 0));
+      const maxUp = Math.max(0, ...ups);
+      const maxDown = Math.max(0, ...downs);
+      if (maxUp === 0 && maxDown === 0) return `<div class="chart-empty" style="height:${height}px">${chartEscape(emptyText)}</div>`;
+      const top = maxUp > 0 ? chartNiceMax(maxUp) : 0;
+      const bottom = maxDown > 0 ? chartNiceMax(maxDown) : 0;
+      const span = top + bottom;
+      const zero = (bottom / span) * 100;
+      const lines = [[100, top], [zero, 0], [0, -bottom]].filter(([pos, v], k) => k === 1 || v !== 0);
+      const grid = lines.map(([pos, v]) => `<div class="chart-gridline${v === 0 ? ' chart-zero' : ''}" style="bottom:${pos}%"><span>${chartEscape(v === 0 ? '0' : format(v))}</span></div>`).join('');
+      const cols = Array.from({ length: n }, (_, i) => {
+        const net = ups[i] - downs[i];
+        const moved = series.filter((s) => val(s, i) !== 0);
+        const tip = [chartBucketTitle(buckets, i), ...moved.map((s) => `${s.label} ${format(val(s, i))}`), `Net ${format(net)}`].join('\n');
+        const seg = (s, v) => `<span class="chart-seg" style="flex-grow:${v};background:${chartEscape(s.color)}"></span>`;
+        const up = series.filter((s) => val(s, i) > 0).map((s) => seg(s, val(s, i))).reverse().join('');
+        const down = series.filter((s) => val(s, i) < 0).map((s) => seg(s, -val(s, i))).join('');
+        return `<div class="chart-col chart-dcol" tabindex="0" data-tip="${chartEscape(tip)}">
+          ${up ? `<div class="chart-stack chart-up" style="bottom:${zero}%;height:${(ups[i] / span) * 100}%">${up}</div>` : ''}
+          ${down ? `<div class="chart-stack chart-down" style="top:${100 - zero}%;height:${(downs[i] / span) * 100}%">${down}</div>` : ''}
+          ${moved.length ? `<i class="chart-net" style="bottom:${zero + (net / span) * 100}%"></i>` : ''}
+        </div>`;
+      }).join('');
+      const labelEvery = Math.max(1, Math.ceil(n / 6));
+      const labels = buckets.starts.map((_, i) => (i % labelEvery === (n - 1) % labelEvery
+        ? `<span style="left:${((i + 0.5) / n) * 100}%">${chartEscape(chartBucketLabel(buckets, i))}</span>`
+        : '')).join('');
+      return `<div class="chart chart-columns chart-diverging">
+        <div class="chart-plot" style="height:${height}px"><div class="chart-grid">${grid}</div><div class="chart-cols">${cols}</div></div>
+        <div class="chart-xlabels">${labels}</div>
+      </div>`;
+    }
+
+    // A histogram's bin names from its edges (one more bin than edges, as the server counts them):
+    // "under 1m", "1m–2m", "1h+". integer: whole-number data, so a bin ends one below the next edge
+    // ("1 to 100") and a one-wide bin is its value ("0").
+    function chartBinLabels(edges, { format = chartCompact, integer = false } = {}) {
+      const list = (edges || []).map(Number);
+      if (list.length === 0) return ['All'];
+      const labels = [`under ${format(list[0])}`];
+      for (let i = 0; i < list.length - 1; i++) {
+        const lo = list[i];
+        const hi = list[i + 1];
+        if (integer && hi - lo === 1) labels.push(format(lo));
+        else if (integer) labels.push(`${format(lo)} to ${format(hi - 1)}`);
+        else labels.push(`${format(lo)}–${format(hi)}`);
+      }
+      labels.push(`${format(list[list.length - 1])}+`);
+      return labels;
+    }
+
+    // A histogram: one column per bin, each labelled under it, on one scale. bins: [{ label, value }].
+    function chartBins(bins, { height = 140, color = CHART_COLORS.accent, emptyText = 'Nothing in this window', unitLabel = '' } = {}) {
+      const list = bins || [];
+      const total = list.reduce((a, b) => a + (Number(b.value) || 0), 0);
+      if (total === 0) return `<div class="chart-empty" style="height:${height}px">${chartEscape(emptyText)}</div>`;
+      const top = chartNiceMax(Math.max(...list.map((b) => Number(b.value) || 0)));
+      const grid = chartTicks(top).map((t) => `<div class="chart-gridline" style="bottom:${(t / top) * 100}%"><span>${chartEscape(chartCompact(t))}</span></div>`).join('');
+      const pct = (v) => Math.round((v / total) * 1000) / 10;
+      const cols = list.map((b) => {
+        const v = Number(b.value) || 0;
+        const tip = `${b.label}\n${v}${unitLabel ? ` ${unitLabel}` : ''} · ${pct(v)}%`;
+        return `<div class="chart-col" tabindex="0" data-tip="${chartEscape(tip)}"><div class="chart-stack" style="height:${(v / top) * 100}%">${v > 0 ? `<span class="chart-seg" style="flex-grow:1;background:${chartEscape(color)}"></span>` : ''}</div></div>`;
+      }).join('');
+      const labels = list.map((b) => `<span>${chartEscape(b.label)}</span>`).join('');
+      return `<div class="chart chart-bins">
+        <div class="chart-plot" style="height:${height}px"><div class="chart-grid">${grid}</div><div class="chart-cols">${cols}</div></div>
+        <div class="chart-binlabels">${labels}</div>
+      </div>`;
+    }
+
+    // A server histogram ({ edges, counts }) as bins with their names.
+    function chartHistogramBins(histogram, options = {}) {
+      const counts = (histogram && histogram.counts) || [];
+      const labels = chartBinLabels((histogram && histogram.edges) || [], options);
+      return counts.map((value, i) => ({ label: labels[i] ?? String(i), value: Number(value) || 0 }));
+    }
+
     // Embedded from server/activity.js; activity.test.ts enforces parity.
     const ACTIVITY_STARTUP_SPANS = ['app.cold_start', 'startup.critical_phase', 'startup.preload', 'preload.critical'];
     const ACTIVITY_QUEUE_EVENTS = ['queue.joined', 'matchmaking.started', 'queue.cancelled', 'matchmaking.cancelled', 'queue.matched', 'matchmaking.seated'];
@@ -2551,6 +2721,26 @@
 
       const events = activityEvents((rows.productEvents || []).filter((e) => activityTime(e.event_ts) >= cutoff && onPlatform(e) && onVersion(e)), buckets);
 
+      // The window before, of the same length, for the headline changes (plan D2): only when the rows
+      // reach back that far (options.previous), else null and the portal shows no change.
+      let previous = null;
+      if (options.previous) {
+        const before = (rows.sessions || []).filter((s) => {
+          const t = activityTime(s.started_at);
+          return t >= cutoff - hours * 3600000 && t < cutoff && onPlatform(s) && onVersion(s);
+        });
+        previous = {
+          sessions: {
+            total: before.length,
+            crashed: before.filter((s) => s.status === 'crashed').length,
+            errored: before.filter((s) => Number(s.errors_count) > 0).length,
+            players: new Set(before.map(actorOf)).size,
+            crashedPlayers: new Set(before.filter((s) => s.status === 'crashed').map(actorOf)).size,
+            durationMsSum: before.reduce((a, s) => a + (Number(s.duration_ms) || 0), 0),
+          },
+        };
+      }
+
       return {
         version: 1,
         environment: options.environment || 'production',
@@ -2565,6 +2755,7 @@
         startupByVersion,
         events,
         spans,
+        previous,
       };
     }
 
@@ -2713,6 +2904,286 @@
         handSeries,
         queueEvents,
         queueEventsTruncated: queue.length > ACTIVITY_QUEUE_LIMIT,
+      };
+    }
+
+    // Embedded from server/demoTotals.js; demoTotals.test.ts enforces parity.
+    const DEMO_STORE_ITEMS = [
+      ['skins', 'frame_hearts'], ['sets', 'diego_set2'], ['skins', 'table_clubs'], ['parts', 'priya_set1_hair_front_1'],
+      ['collections', 'collection_suits'], ['parts', 'rafael_spades_tunic_1'], ['skins', 'frame_spades'],
+    ];
+    const DEMO_PRODUCTS = [
+      ['com.minamopoker.tier1', 'Starter Bundle', 0.99], ['com.minamopoker.tier2', 'Bronze Bundle', 4.99],
+      ['com.minamopoker.tier3', 'Silver Bundle', 9.99], ['com.minamopoker.tier4', 'Gold Bundle', 19.99],
+    ];
+    const DEMO_PLAYERS = ['lucky_otter', 'brave_heron', 'quiet_fox', 'bold_lynx', 'swift_crane', 'calm_badger', 'wild_raven', 'sly_marten'];
+    const DEMO_STAKES = [
+      ['casual', 'Casual', 10, 20, 'medium', -18], ['low', 'Low', 25, 50, 'medium', -26],
+      ['mid', 'Mid', 100, 200, 'hard', -41], ['high', 'High', 500, 1000, 'hard', -55], ['elite', 'Elite', 2500, 5000, 'expert', -70],
+    ];
+
+    // A small seeded generator (mulberry32): the same seed gives the same draws.
+    function demoRandom(seed) {
+      let t = seed >>> 0;
+      return () => {
+        t = (t + 0x6d2b79f5) >>> 0;
+        let r = Math.imul(t ^ (t >>> 15), 1 | t);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    // One value per bucket around a daily rate (an hour gets a 24th), drawn from the bucket's hours.
+    function demoSeries(buckets, perDay, spread, seed, chance = 1) {
+      const hourly = buckets.unit === 'hour';
+      return buckets.starts.map((start, i) => {
+        const end = i + 1 < buckets.starts.length ? buckets.starts[i + 1] : buckets.end;
+        let total = 0;
+        for (let h = Math.floor(start / 3600000); h < Math.floor(end / 3600000); h++) {
+          const rnd = demoRandom(h * 97 + seed);
+          if (rnd() > chance) continue;
+          total += (perDay / 24 / chance) * (1 - spread + 2 * spread * rnd());
+        }
+        return Math.round(hourly ? total : total);
+      });
+    }
+
+    const demoSum = (values) => values.reduce((a, b) => a + b, 0);
+
+    // The window's buckets and the window before's, the same hours earlier.
+    function demoWindows(options) {
+      const hours = Math.min(8760, Math.max(1, Math.round(Number(options.windowHours) || 24)));
+      const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+      return { hours, nowMs, buckets: chartTimeBuckets(hours, nowMs), before: chartTimeBuckets(hours, nowMs - hours * 3600000) };
+    }
+
+    // The economy's flows (signed chips per bucket) for one set of buckets.
+    function demoFlows(buckets) {
+      const net = (perDay, swing, seed) => demoSeries(buckets, swing, 1, seed).map((v, i) => v - demoSeries(buckets, swing - perDay, 1, seed + 1)[i]);
+      return {
+        spins: demoSeries(buckets, 28000, 0.4, 11),
+        bonus: demoSeries(buckets, 5000, 0.5, 12, 0.3),
+        purchased: demoSeries(buckets, 30000, 0.2, 13, 0.08),
+        signup: demoSeries(buckets, 4, 0.3, 14, 0.15).map((v) => v * 10000),
+        store_skins: demoSeries(buckets, 42000, 0.6, 15, 0.4).map((v) => -v),
+        store_sets: demoSeries(buckets, 26000, 0.6, 16, 0.25).map((v) => -v),
+        store_parts: demoSeries(buckets, 14000, 0.6, 17, 0.35).map((v) => -v),
+        store_collections: demoSeries(buckets, 6000, 0.6, 18, 0.1).map((v) => -v),
+        casual: net(-3000, 16000, 19),
+        ranked: net(-6000, 9000, 21),
+        tourney: net(-800, 3000, 23),
+        transfer: demoSeries(buckets, 4000, 0.5, 25, 0.05),
+      };
+    }
+
+    function demoTotals(flows, players, newAccounts) {
+      let created = 0;
+      let removed = 0;
+      for (const [flow, values] of Object.entries(flows)) {
+        if (flow === 'transfer') continue;
+        const total = demoSum(values);
+        if (total > 0) created += total;
+        else removed -= total;
+      }
+      return { created, removed, net: created - removed, activePlayers: players, newAccounts };
+    }
+
+    /** The demo's Economy totals: get_cortex_economy's shape for the window. */
+    function demoEconomy(options = {}) {
+      const { hours, nowMs, buckets, before } = demoWindows(options);
+      const flowsNow = demoFlows(buckets);
+      const flowsBefore = demoFlows(before);
+      const scale = Math.max(1, hours / 24);
+      const players = Math.round(18 * Math.sqrt(scale));
+      const newAccounts = Math.round(demoSum(flowsNow.signup) / 10000);
+      const flows = Object.entries(flowsNow).filter(([, values]) => values.some((v) => v !== 0)).map(([flow, values]) => ({
+        flow,
+        amount: demoSum(values),
+        count: flow === 'signup' ? newAccounts : values.filter((v) => v !== 0).length * 3,
+        players: flow === 'signup' ? 0 : Math.min(players, values.filter((v) => v !== 0).length + 2),
+        series: values,
+      })).sort((a, b) => (a.flow < b.flow ? -1 : 1));
+      const storeSpent = -['store_skins', 'store_sets', 'store_parts', 'store_collections'].reduce((a, k) => a + demoSum(flowsNow[k]), 0);
+      // Purchases per bucket and store, each at one pack's list price, so every total agrees.
+      const packs = (values, seed) => values.map((count, i) => {
+        let usd = 0;
+        for (let k = 0; k < count; k++) usd += DEMO_PRODUCTS[Math.floor(demoRandom(seed + i * 13 + k)() * DEMO_PRODUCTS.length)][2];
+        return Math.round(usd * 100) / 100;
+      });
+      const iosCount = demoSeries(buckets, 3, 0.5, 31, 0.15);
+      const androidCount = demoSeries(buckets, 2, 0.5, 33, 0.12);
+      const ios = packs(iosCount, 310);
+      const android = packs(androidCount, 330);
+      const purchases = demoSum(iosCount) + demoSum(androidCount);
+      const revenueUsd = Math.round((demoSum(ios) + demoSum(android)) * 100) / 100;
+      const beforeCount = demoSeries(before, 5, 0.5, 35, 0.15);
+      const previousRevenue = Math.round(demoSum(packs(beforeCount, 350)) * 100) / 100;
+      return {
+        version: 1,
+        windowHours: hours,
+        timeZone: options.timeZone || 'UTC',
+        includeTest: Boolean(options.includeTest),
+        generatedAt: nowMs,
+        buckets: { unit: buckets.unit, starts: buckets.starts, end: buckets.end },
+        flows,
+        totals: demoTotals(flowsNow, players, newAccounts),
+        store: {
+          spent: storeSpent,
+          purchases: Math.max(1, Math.round(storeSpent / 9000)),
+          buyers: Math.max(1, Math.round(storeSpent / 25000)),
+          items: DEMO_STORE_ITEMS.map(([kind, item], i) => ({
+            kind, item, count: Math.max(1, Math.round((storeSpent / 60000) / (i + 1))),
+            chips: Math.round(storeSpent / (2 ** (i + 1))), buyers: Math.max(1, Math.round((storeSpent / 90000) / (i + 1))),
+          })).filter((x) => x.chips > 0),
+        },
+        money: {
+          purchases,
+          buyers: Math.max(0, Math.round(purchases * 0.7)),
+          grossUsd: revenueUsd,
+          refunds: 0,
+          refundedUsd: 0,
+          revenueUsd,
+          hiddenTestPurchases: options.includeTest ? 0 : 3,
+          byProduct: DEMO_PRODUCTS.map(([productId, name, priceUsd]) => {
+            const n = [...iosCount.map((c, i) => [c, 310 + i * 13]), ...androidCount.map((c, i) => [c, 330 + i * 13])]
+              .reduce((a, [c, seed]) => a + Array.from({ length: c }, (_, k) => DEMO_PRODUCTS[Math.floor(demoRandom(seed + k)() * DEMO_PRODUCTS.length)][0])
+                .filter((id) => id === productId).length, 0);
+            return { productId, name, priceUsd, purchases: n, buyers: Math.max(1, Math.round(n * 0.8)), revenueUsd: Math.round(n * priceUsd * 100) / 100 };
+          }).filter((p) => p.purchases > 0),
+          series: { ios, android, purchases: iosCount.map((v, i) => v + androidCount[i]) },
+        },
+        tokens: [
+          { tokenType: 'clubs', reason: 'win', count: Math.round(4 * scale), amount: Math.round(8 * scale), players: 3 },
+          { tokenType: 'clubs', reason: 'prize', count: Math.round(3 * scale), amount: Math.round(3 * scale), players: 3 },
+          { tokenType: 'hearts', reason: 'purchase', count: Math.round(2 * scale), amount: -Math.round(4 * scale), players: 2 },
+          { tokenType: 'spades', reason: 'exchange', count: 2, amount: -6, players: 1 },
+          { tokenType: 'hearts', reason: 'exchange', count: 2, amount: 2, players: 1 },
+        ],
+        wealth: {
+          players,
+          median: 38500,
+          histogram: { edges: [1000, 10000, 100000, 1000000], counts: [Math.round(players * 0.12), Math.round(players * 0.3), Math.round(players * 0.4), Math.round(players * 0.15), Math.round(players * 0.03)] },
+          cheapestBuyIn: 1000,
+          underCheapestBuyIn: Math.round(players * 0.12),
+        },
+        perPlayerDay: {
+          playerDays: Math.round(players * Math.min(scale, 7)),
+          up: Math.round(players * Math.min(scale, 7) * 0.45),
+          down: Math.round(players * Math.min(scale, 7) * 0.5),
+          p10: -9200, p25: -2600, p50: 300, p75: 2400, p90: 7800,
+          tables: { playerDays: Math.round(players * Math.min(scale, 7) * 0.8), up: Math.round(players * 0.35), down: Math.round(players * 0.5), p25: -3100, p50: -400, p75: 1900 },
+        },
+        previous: {
+          ...demoTotals(flowsBefore, Math.round(players * 0.92), Math.round(demoSum(flowsBefore.signup) / 10000)),
+          storeSpent: -['store_skins', 'store_sets', 'store_parts', 'store_collections'].reduce((a, k) => a + demoSum(flowsBefore[k]), 0),
+          purchases: demoSum(beforeCount),
+          buyers: Math.round(demoSum(beforeCount) * 0.7),
+          revenueUsd: previousRevenue,
+        },
+      };
+    }
+
+    /** The demo's Games totals: get_cortex_play's shape for the window. */
+    function demoPlay(options = {}) {
+      const { hours, nowMs, buckets, before } = demoWindows(options);
+      const scale = Math.max(1, hours / 24);
+      const series = {
+        casual: demoSeries(buckets, 42, 0.5, 41),
+        ranked: demoSeries(buckets, 16, 0.5, 43),
+        tourney: demoSeries(buckets, 6, 0.6, 45, 0.6),
+        hands: demoSeries(buckets, 640, 0.4, 47),
+      };
+      const beforeGames = demoSum(demoSeries(before, 42, 0.5, 41)) + demoSum(demoSeries(before, 16, 0.5, 43)) + demoSum(demoSeries(before, 6, 0.6, 45, 0.6));
+      const games = { casual: demoSum(series.casual), ranked: demoSum(series.ranked), tourney: demoSum(series.tourney) };
+      const hands = demoSum(series.hands);
+      const players = Math.round(18 * Math.sqrt(scale));
+      const share = (n, parts) => parts.map((p) => Math.round(n * p));
+      const flows = demoFlows(buckets);
+      const lists = DEMO_PLAYERS.map((username, i) => {
+        const rnd = demoRandom(i * 7 + 3);
+        const casual = Math.round((rnd() - 0.6) * 40000 * Math.sqrt(scale));
+        const ranked = Math.round((rnd() - 0.55) * 12000 * Math.sqrt(scale));
+        const tourney = Math.round((rnd() - 0.5) * 4000);
+        return {
+          userId: `demo-player-${i + 1}`, username, games: Math.round((12 - i) * Math.sqrt(scale)),
+          tableSec: Math.round((7200 - i * 700) * Math.sqrt(scale)), hands: Math.round((240 - i * 24) * Math.sqrt(scale)),
+          handsWon: Math.round((60 - i * 6) * Math.sqrt(scale)), netChips: casual + ranked + tourney, casual, ranked, tourney,
+        };
+      });
+      return {
+        version: 1,
+        environment: options.environment || 'demo',
+        windowHours: hours,
+        timeZone: options.timeZone || 'UTC',
+        includeTest: Boolean(options.includeTest),
+        generatedAt: nowMs,
+        buckets: { unit: buckets.unit, starts: buckets.starts, end: buckets.end },
+        players,
+        games: {
+          casual: { games: games.casual, tables: Math.round(games.casual * 0.7), players: Math.round(players * 0.9) },
+          ranked: { games: games.ranked, tables: Math.round(games.ranked / 2.4), players: Math.round(players * 0.5) },
+          tourney: { games: games.tourney, tables: Math.round(games.tourney / 2), players: Math.round(players * 0.3) },
+        },
+        hands: {
+          casual: { playerHands: Math.round(hands * 0.7), hands: Math.round(hands * 0.62), won: Math.round(hands * 0.17), lost: Math.round(hands * 0.21), folded: Math.round(hands * 0.32) },
+          ranked: { playerHands: Math.round(hands * 0.22), hands: Math.round(hands * 0.2), won: Math.round(hands * 0.05), lost: Math.round(hands * 0.06), folded: Math.round(hands * 0.11) },
+          tourney: { playerHands: Math.round(hands * 0.08), hands: Math.round(hands * 0.07), won: Math.round(hands * 0.02), lost: Math.round(hands * 0.02), folded: Math.round(hands * 0.04) },
+        },
+        series,
+        lengths: {
+          all: { count: games.casual + games.ranked + games.tourney, medianSec: 540, histogram: { edges: [60, 120, 300, 600, 1200, 1800, 3600], counts: share(games.casual + games.ranked + games.tourney, [0.04, 0.12, 0.24, 0.22, 0.18, 0.09, 0.08, 0.03]) } },
+          casual: { count: games.casual, medianSec: 780, histogram: { edges: [60, 120, 300, 600, 1200, 1800, 3600], counts: share(games.casual, [0.05, 0.08, 0.18, 0.22, 0.22, 0.12, 0.09, 0.04]) } },
+          ranked: { count: games.ranked, medianSec: 150, histogram: { edges: [60, 120, 300, 600, 1200, 1800, 3600], counts: share(games.ranked, [0.05, 0.3, 0.45, 0.15, 0.05, 0, 0, 0]) } },
+          tourney: { count: games.tourney, medianSec: 240, histogram: { edges: [60, 120, 300, 600, 1200, 1800, 3600], counts: share(games.tourney, [0.1, 0.25, 0.35, 0.2, 0.1, 0, 0, 0]) } },
+        },
+        tableTime: {
+          players, medianSecPerPlayer: Math.round(1900 * Math.sqrt(scale)), totalSec: Math.round(players * 2600 * Math.sqrt(scale)),
+          playerDays: Math.round(players * Math.min(scale, 7) * 0.8), p25: 600, p50: 1500, p75: 3300, p90: 6100,
+          histogram: { edges: [300, 900, 1800, 3600, 7200], counts: share(Math.round(players * Math.min(scale, 7) * 0.8), [0.14, 0.24, 0.24, 0.2, 0.12, 0.06]) },
+        },
+        appSessions: { count: Math.round(70 * scale), medianSec: 410, histogram: { edges: [60, 300, 900, 1800, 3600], counts: share(Math.round(70 * scale), [0.18, 0.26, 0.28, 0.15, 0.09, 0.04]) } },
+        netPerHand: { edges: [-10000, -1000, -100, 0, 1, 101, 1001, 10001], counts: share(hands, [0.005, 0.06, 0.18, 0.31, 0.12, 0.12, 0.15, 0.05, 0.005]) },
+        ranked: {
+          places: [
+            { seats: 3, placement: 1, count: Math.round(games.ranked * 0.2) }, { seats: 3, placement: 2, count: Math.round(games.ranked * 0.18) },
+            { seats: 3, placement: 3, count: Math.round(games.ranked * 0.17) }, { seats: 5, placement: 1, count: Math.round(games.ranked * 0.1) },
+            { seats: 5, placement: 2, count: Math.round(games.ranked * 0.09) }, { seats: 5, placement: 3, count: Math.round(games.ranked * 0.09) },
+            { seats: 5, placement: 4, count: Math.round(games.ranked * 0.08) }, { seats: 5, placement: 5, count: Math.round(games.ranked * 0.09) },
+          ],
+          mmrChange: { count: games.ranked, median: 4, histogram: { edges: [-40, -20, -10, 0, 1, 11, 21, 41], counts: share(games.ranked, [0.02, 0.12, 0.16, 0.18, 0.06, 0.16, 0.14, 0.12, 0.04]) } },
+        },
+        tourney: {
+          entries: games.tourney, finished: Math.max(0, games.tourney - 1), costChips: games.tourney * 4000,
+          prizeTokens: Math.round(games.tourney / 2) * 2 + Math.round(games.tourney / 3), prizeChips: games.tourney * 2200, entriesReturned: Math.round(games.tourney / 2) + Math.round(games.tourney / 3),
+          places: [1, 2, 3].map((placement) => ({ placement, count: Math.round(games.tourney / (placement + 1)), tokens: placement === 1 ? Math.round(games.tourney / 2) * 2 : placement === 2 ? Math.round(games.tourney / 3) : 0 })),
+        },
+        house: {
+          casual: { net: demoSum(flows.casual), series: flows.casual },
+          ranked: { net: demoSum(flows.ranked), series: flows.ranked },
+          tourney: { net: demoSum(flows.tourney), series: flows.tourney },
+        },
+        botsVsPlayers: DEMO_STAKES.map(([stake, name, smallBlind, bigBlind, botDifficulty, bb], i) => {
+          const n = Math.round((hands * 0.5) / (2 ** (i + 1)));
+          return {
+            stake, name, smallBlind, bigBlind, botDifficulty, players: Math.max(1, Math.round(players / (i + 2))),
+            playersUp: Math.max(0, Math.round(players / (i + 4))), playersDown: Math.max(1, Math.round(players / (i + 3))),
+            hands: n, avgDealt: 3.4, netChips: Math.round((bb / 100) * n * bigBlind), bbPer100: bb, ci95: n > 1 ? Math.round(1960 / Math.sqrt(n)) : null,
+            handsWonPct: 21.5 - i,
+          };
+        }).filter((s) => s.hands > 0),
+        lists: {
+          mostActive: lists.slice(0, 8),
+          winners: lists.filter((p) => p.netChips > 0).sort((a, b) => b.netChips - a.netChips),
+          losers: lists.filter((p) => p.netChips < 0).sort((a, b) => a.netChips - b.netChips),
+        },
+        previous: {
+          players: Math.round(players * 0.94),
+          games: beforeGames,
+          playerHands: Math.round(demoSum(demoSeries(before, 640, 0.4, 47)) * 1),
+          handsWon: Math.round(demoSum(demoSeries(before, 640, 0.4, 47)) * 0.24),
+          medianGameSec: 500,
+          medianSecPerPlayer: Math.round(1800 * Math.sqrt(scale)),
+        },
       };
     }
 
@@ -2875,7 +3346,7 @@
     function snapshotActivity(snap, source) {
       const rows = (list) => filterRowsByState(list, false);
       const act = buildCortexActivity({
-        sessions: rows(snap.sessions),
+        sessions: rows(snap.sessions).concat(source === 'demo' ? rows(snap.previous_sessions) : []),
         productEvents: rows(snap.product_events),
         spans: rows(snap.performance_spans),
         hiddenSessions: testTrafficFromSnapshot(snap)?.hiddenSessions || 0,
@@ -2885,6 +3356,7 @@
         includeTest: state.includeTest,
         platform: state.platform,
         appVersion: state.appVersion,
+        previous: source === 'demo',
       });
       act.source = source;
       return act;
@@ -2915,6 +3387,7 @@
       localStorage.setItem('cortex_active_env_v2', env);
       state.edgeSnapCache = null;
       state.edgeActivityCache = null;
+      state.edgeTotalsCache = null;
       state.edgeLastError = null;
       syncEnvButtonsUI();
       renderEdgeGateAuthPrompt(currentInputVal);
@@ -2993,6 +3466,7 @@
       localStorage.setItem('cortex_owner_key', val);
       state.edgeSnapCache = null;
       state.edgeActivityCache = null;
+      state.edgeTotalsCache = null;
       const snap = await fetchEdgeSnapshot(true);
       authVerifying = false;
       if (!snap) {
@@ -3058,6 +3532,7 @@
       localStorage.setItem('cortex_data_source', mode);
       state.edgeSnapCache = null;
       state.edgeActivityCache = null;
+      state.edgeTotalsCache = null;
       openEdgeGateDrawer();
       await loadVersions();
       await refreshActiveTab();
@@ -3069,6 +3544,7 @@
       localStorage.setItem('cortex_owner_key', val);
       state.edgeSnapCache = null;
       state.edgeActivityCache = null;
+      state.edgeTotalsCache = null;
       closeEdgeGateDrawer();
       await loadVersions();
       await refreshActiveTab();
@@ -3212,6 +3688,56 @@
         return null;
       }
     }
+    // The Economy and Games tabs' server totals (cortex-admin `economy` and `play`, MinamoPokerBE 1.89.0),
+    // cached like the activity; null from a backend without the action (it answers 400).
+    async function fetchEdgeTotals(action) {
+      if (!state.ownerKey) return null;
+      const params = new URLSearchParams({
+        action,
+        environment: state.environment,
+        windowHours: String(state.windowHours),
+        timeZone: viewerTimeZone(),
+        includeTest: String(state.includeTest),
+      }).toString();
+      if (state.edgeTotalsCache && state.edgeTotalsCache.has(params)) return state.edgeTotalsCache.get(params);
+      try {
+        const res = await fetch(`${getEdgeUrl(state.environment)}?${params}`, {
+          headers: {
+            Authorization: `Bearer ${state.ownerKey}`,
+            'x-cortex-owner-key': state.ownerKey,
+            Accept: 'application/json',
+          },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body[action] || !body[action].buckets) return null;
+        if (!state.edgeTotalsCache) state.edgeTotalsCache = new Map();
+        state.edgeTotalsCache.set(params, body[action]);
+        return body[action];
+      } catch {
+        return null;
+      }
+    }
+
+    // The Economy or Games totals for the tab and where they came from: the server's, the demo's, or
+    // why there are none ('backend': the backend has no such action yet; 'key': the local server has
+    // no service key for this environment).
+    async function tabTotals(tab) {
+      const kind = tab === 'economy' ? 'economy' : 'play';
+      const demoOptions = { windowHours: state.windowHours, timeZone: viewerTimeZone(), includeTest: state.includeTest, environment: state.environment };
+      if (state.environment === 'demo') {
+        return { totals: kind === 'economy' ? demoEconomy(demoOptions) : demoPlay(demoOptions), source: 'demo' };
+      }
+      if (state.dataSource === 'edge') {
+        const totals = await fetchEdgeTotals(kind);
+        return totals ? { totals, source: 'server' } : { totals: null, source: 'backend' };
+      }
+      const res = await fetch(`/api/${kind}?${queryStr()}&timeZone=${encodeURIComponent(viewerTimeZone())}`);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Cortex answered ${res.status}`);
+      if (!body.ok) return { totals: null, source: body.reason === 'no_key' ? 'key' : 'backend' };
+      return { totals: body[kind], source: 'server' };
+    }
+
     const TAB_RENDERERS = {
       pulse: (root, d) => renderPulse(root, d),
       players: (root, d) => renderPlayers(root, d),
@@ -3276,6 +3802,11 @@
             if (tab === 'pulse') data = pulseFromActivity(act, snap);
             else if (tab === 'vitals') data = vitalsFromActivity(act);
             else data = radarFromActivity(act, snap.new_players);
+            if (tab === 'economy' || tab === 'games') {
+              const totals = await tabTotals(tab);
+              if (!current()) return;
+              data = { ...data, totals: totals.totals, totalsSource: totals.source };
+            }
           } else if (tab === 'triage') data = { issues };
           else data = { reports };
           TAB_RENDERERS[tab](root, data);
@@ -3303,6 +3834,11 @@
           if (tab === 'pulse') data = pulseFromActivity(act, { issues: triage.issues || [], error_events: [], bug_reports: inbox.reports || [] });
           else if (tab === 'vitals') data = vitalsFromActivity(act);
           else data = radarFromActivity(act, body.newPlayers);
+          if (tab === 'economy' || tab === 'games') {
+            const totals = await tabTotals(tab);
+            if (!current()) return;
+            data = { ...data, totals: totals.totals, totalsSource: totals.source };
+          }
         } else if (tab === 'triage') data = triage;
         else data = inbox;
         TAB_RENDERERS[tab](root, data);
@@ -3336,15 +3872,27 @@
     // A headline number: a label (with a swatch when it names a series), the value, a line under it
     // (HTML) and an optional trend line.
     function statTile(tile) {
-      const { label, value, sub = '', spark = '', swatch = '' } = tile;
+      const { label, value, sub = '', spark = '', swatch = '', delta = '' } = tile;
       return `
         <div class="kpi-card">
           <div class="kpi-label">${swatch ? `<i class="key-swatch" style="background:${escapeHtml(swatch)}"></i>` : ''}${escapeHtml(label)}</div>
           <div class="kpi-value">${escapeHtml(value)}</div>
+          ${delta ? `<div class="kpi-delta">${delta}</div>` : ''}
           ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
           ${spark}
         </div>
       `;
+    }
+
+    // The window before, in words: "the 24h before", "the 7 days before".
+    function previousLabel() {
+      return { 24: 'the 24h before', 168: 'the 7 days before', 720: 'the 30 days before', 2160: 'the 90 days before' }[state.windowHours]
+        || `the ${state.windowHours}h before`;
+    }
+
+    // A headline's change against the window before (plan D2), as a badge; nothing without one.
+    function deltaBadge(current, previous, options = {}) {
+      return chartDeltaBadge(chartDelta(current, previous, { before: previousLabel(), ...options }));
     }
 
     // A status never rides on colour alone: a dot and its word.
@@ -3379,6 +3927,7 @@
 
     function renderPulse(root, data) {
       const s = data.summary;
+      const prev = data.previousSummary;
       const briefing = data.briefing || { status: 'healthy', headline: 'All Systems Healthy', actionItems: [] };
       const comp = data.versionComparison;
       const statusDotColor = briefing.status === 'healthy' ? 'var(--green)' : briefing.status === 'warning' ? 'var(--amber)' : 'var(--red)';
@@ -3487,10 +4036,10 @@
         </div>
 
         <div class="kpi-grid">
-          ${statTile({ label: 'Active players', value: s.activeUsers, sub: `${s.totalSessions} session${s.totalSessions === 1 ? '' : 's'}${hidden}`, spark: act ? chartSparkline(act.players) : '' })}
-          ${statTile({ label: 'Crash-free sessions', value: `${cf}%`, sub: `${cfMark} · ${s.crashedSessions} crashed · ${s.erroredSessions} with an error`, spark: act ? chartSparkline(act.crashed, CHART_COLORS.critical) : '' })}
-          ${statTile({ label: 'Crash-free players', value: `${s.crashFreeUsersPct}%`, sub: `of ${s.activeUsers} player${s.activeUsers === 1 ? '' : 's'}` })}
-          ${statTile({ label: 'Average session', value: chartDuration(s.avgSessionSec), sub: `Across ${s.totalSessions} session${s.totalSessions === 1 ? '' : 's'}`, spark: chartSparkline(avgLength) })}
+          ${statTile({ label: 'Active players', value: s.activeUsers, delta: prev ? deltaBadge(s.activeUsers, prev.activeUsers) : '', sub: `${s.totalSessions} session${s.totalSessions === 1 ? '' : 's'}${hidden}`, spark: act ? chartSparkline(act.players) : '' })}
+          ${statTile({ label: 'Crash-free sessions', value: `${cf}%`, delta: prev && s.totalSessions > 0 ? deltaBadge(cf, prev.crashFreeSessionsPct, { kind: 'pct' }) : '', sub: `${cfMark} · ${s.crashedSessions} crashed · ${s.erroredSessions} with an error`, spark: act ? chartSparkline(act.crashed, CHART_COLORS.critical) : '' })}
+          ${statTile({ label: 'Crash-free players', value: `${s.crashFreeUsersPct}%`, delta: prev && s.activeUsers > 0 ? deltaBadge(s.crashFreeUsersPct, prev.crashFreeUsersPct, { kind: 'pct' }) : '', sub: `of ${s.activeUsers} player${s.activeUsers === 1 ? '' : 's'}` })}
+          ${statTile({ label: 'Average session', value: chartDuration(s.avgSessionSec), delta: prev && prev.totalSessions > 0 && s.totalSessions > 0 ? deltaBadge(s.avgSessionSec, prev.avgSessionSec, { kind: 'duration' }) : '', sub: `Across ${s.totalSessions} session${s.totalSessions === 1 ? '' : 's'}`, spark: chartSparkline(avgLength) })}
         </div>
 
         ${panelCard(`Active players per ${per}`, `iOS and Android, ${windowLabel()}, in your time zone. A player counts once per ${per}.`, activityBody)}
@@ -3574,6 +4123,7 @@
       }
       const today = days[0];
       const week = days.slice(0, 7).reduce((a, b) => ({ ios: a.ios + b.ios, android: a.android + b.android, total: a.total + b.total }), { ios: 0, android: 0, total: 0 });
+      const weekBefore = days.slice(7, 14).reduce((a, b) => a + b.total, 0);
       const share = (n, total) => total > 0 ? `${Math.round((n / total) * 100)}%` : '–';
       // The chart runs oldest to newest; its buckets are the same local days.
       const oldestFirst = days.slice().reverse();
@@ -3593,7 +4143,7 @@
             ${statTile({ label: 'Today · iOS', value: today.ios, sub: `${share(today.ios, today.total)} of today's new players`, swatch: CHART_COLORS.ios })}
             ${statTile({ label: 'Today · Android', value: today.android, sub: `${share(today.android, today.total)} of today's new players`, swatch: CHART_COLORS.android })}
             ${statTile({ label: 'Today · All', value: today.total, sub: `${today.unknown} unknown platform · ${today.linked} linked Apple/Google` })}
-            ${statTile({ label: 'Last 7 days', value: week.total, sub: `iOS ${week.ios} · Android ${week.android}` })}
+            ${statTile({ label: 'Last 7 days', value: week.total, delta: chartDeltaBadge(chartDelta(week.total, weekBefore, { before: 'the 7 days before' })), sub: `iOS ${week.ios} · Android ${week.android}` })}
           </div>
           ${chartColumns({ buckets, series, height: 140, emptyText: 'No new players in the last 14 days' })}
           ${chartLegend(series)}
@@ -3656,19 +4206,51 @@
       `;
     }
 
+    // Why a tab has no server totals: the backend has no such action yet, or the local server has no
+    // service key for the environment (it syncs neither the ledger nor the hand tables).
+    function totalsMissingCard(source, what) {
+      const text = source === 'key'
+        ? `Add this environment's service key, or the portal's owner key, to MinamoCortex/.env: the local server asks the project for its ${what} totals and does not sync the tables they come from.`
+        : `This backend has no ${what} totals yet (MinamoPokerBE 1.89.0). Staging has them; production gets them with the release.`;
+      return `<div class="totals-note">${escapeHtml(text)}</div>`;
+    }
+
+    // A small table people read down: the first column names the row; cells are text.
+    function miniTable(headers, rows, numeric = []) {
+      if (!rows.length) return '<div class="kpi-sub">Nobody in this window.</div>';
+      return `<div class="table-scroll"><table class="mini-table">
+        <thead><tr>${headers.map((h, i) => `<th class="${numeric.includes(i) ? 'num' : ''}">${escapeHtml(h)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td class="${i === 0 ? 'name' : numeric.includes(i) ? 'num' : ''}">${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>`;
+    }
+
+    // A server histogram as a chart with its numbers behind "Show numbers".
+    function histogramBody(histogram, options = {}) {
+      const bins = chartHistogramBins(histogram, options);
+      return `${chartBins(bins, { height: options.height || 120, color: options.color, emptyText: options.emptyText || `Nothing in the ${windowLabel()}`, unitLabel: options.unitLabel || '' })}
+        ${chartDataTable([options.binHeader || 'Range', options.unitHeader || 'Count'], bins.map(b => [b.label, b.value]))}`;
+    }
+
     function renderGames(root, data) {
       const MODE_LABELS = { casual: 'Casual', ranked: 'Ranked', tourney: 'Tourney' };
+      const PLAY_MODES = ['casual', 'ranked', 'tourney'];
       const LEAVE_LABELS = {
         voluntary: 'Left on their own',
         busted_chips: 'Busted (out of chips)',
         timeout_kicked: 'Kicked for timing out',
         disconnected: 'Connection dropped',
       };
+      const OUTCOMES = [
+        { key: 'won', label: 'Won', color: CHART_SERIES[5] },
+        { key: 'lost', label: 'Lost', color: CHART_SERIES[7] },
+        { key: 'folded', label: 'Folded', color: CHART_COLORS.other },
+      ];
       const modes = data.gameModes || [];
       const insights = data.tableInsights || {};
       const hs = data.handSeries;
-      const per = hs && hs.buckets.unit === 'day' ? 'day' : 'hour';
-      const handSeries = hs ? ['casual', 'ranked', 'tourney'].map(m => ({ label: MODE_LABELS[m], color: CHART_COLORS[m], values: hs[m] })) : [];
+      const p = data.totals;
+      const per = ((p && p.buckets) || (hs && hs.buckets) || {}).unit === 'day' ? 'day' : 'hour';
+      const handSeries = hs ? PLAY_MODES.map(m => ({ label: MODE_LABELS[m], color: CHART_COLORS[m], values: hs[m] })) : [];
       const handTotals = hs ? hs.casual.map((v, i) => v + hs.ranked[i] + hs.tourney[i]) : [];
       const attempts = modes.reduce((a, m) => a + (Number(m.queueJoins) || 0), 0);
       const leaves = (data.tableLeaveBreakdown || []).filter(l => l.count > 0);
@@ -3680,18 +4262,13 @@
       const notes = modes.filter(m => queueQualityNote(m)).map(m => `
         <div class="panel-subtitle" style="margin-top:10px;"><strong>${escapeHtml(m.mode.toUpperCase())}:</strong> ${escapeHtml(queueQualityNote(m))}.</div>
       `).join('');
-
-      root.innerHTML = `
-        ${totalsNote(data.source)}
+      const qualityTiles = `
         <div class="kpi-grid">
-          ${statTile({ label: 'Hands played', value: insights.totalHandsCompleted || 0, sub: capitalize(windowLabel()), spark: chartSparkline(handTotals) })}
           ${statTile({ label: 'Queue attempts', value: attempts, sub: modes.map(m => `${MODE_LABELS[m.mode] || m.mode} ${m.queueJoins}`).join(' · ') })}
           ${statTile({ label: 'Turn timeouts', value: insights.turnTimeouts || 0, sub: `${insights.turnTimeoutRatePct || 0}% of hands` })}
           ${statTile({ label: 'Connection drops', value: insights.realtimeDisconnects || 0, sub: `${insights.realtimeStateFallbacks || 0} state fallback${insights.realtimeStateFallbacks === 1 ? '' : 's'}` })}
-        </div>
-
-        ${panelCard(`Hands per ${per}`, `Hands completed by mode, ${windowLabel()}, in your time zone.`, handsBody)}
-
+        </div>`;
+      const queueCards = `
         <div class="grid-2">
           ${panelCard('Modes and matchmaking', 'Cancellation rate and wait time count each queue attempt once. Attempts are reconstructed from session events; seating takes precedence when a cancellation races with a match.', `
             ${attempts > 0 ? chartHBars(modes.map(m => ({
@@ -3708,37 +4285,271 @@
             value: l.count,
             valueText: `${l.count} · ${l.sharePct}%`,
           })), { emptyText: 'No tables left in this window' }))}
+        </div>`;
+
+      if (!p) {
+        root.innerHTML = `
+          ${totalsNote(data.source)}
+          ${totalsMissingCard(data.totalsSource, 'games')}
+          <div class="kpi-grid">
+            ${statTile({ label: 'Hands played', value: insights.totalHandsCompleted || 0, sub: capitalize(windowLabel()), spark: chartSparkline(handTotals) })}
+          </div>
+          ${qualityTiles}
+          ${panelCard(`Hands per ${per}`, `Hands completed by mode, ${windowLabel()}, in your time zone.`, handsBody)}
+          ${queueCards}
+        `;
+        return;
+      }
+
+      const prev = p.previous || {};
+      const games = PLAY_MODES.reduce((a, m) => a + Number(p.games[m].games || 0), 0);
+      const playerHands = PLAY_MODES.reduce((a, m) => a + Number(p.hands[m].playerHands || 0), 0);
+      const won = PLAY_MODES.reduce((a, m) => a + Number(p.hands[m].won || 0), 0);
+      const gameSeries = PLAY_MODES.map(m => ({ label: MODE_LABELS[m], color: CHART_COLORS[m], values: p.series[m] }));
+      const gameTotals = p.series.casual.map((v, i) => v + p.series.ranked[i] + p.series.tourney[i]);
+      const houseSeries = PLAY_MODES.map(m => ({ label: MODE_LABELS[m], color: CHART_COLORS[m], values: p.house[m].series }));
+      const houseNet = PLAY_MODES.reduce((a, m) => a + Number(p.house[m].net || 0), 0);
+      const lengthMedians = PLAY_MODES.filter(m => p.lengths[m].count > 0)
+        .map(m => `${MODE_LABELS[m]} ${chartDurationShort(p.lengths[m].medianSec)} (${p.lengths[m].count})`).join(' · ');
+      const outcomeBars = PLAY_MODES.filter(m => p.hands[m].playerHands > 0).map(m => `
+        <div class="chart-subhead">${escapeHtml(MODE_LABELS[m])} · ${chartCompact(p.hands[m].playerHands)} hand${p.hands[m].playerHands === 1 ? '' : 's'} by players</div>
+        ${chartShareBar(OUTCOMES.map(o => ({ label: o.label, value: p.hands[m][o.key], color: o.color })))}
+      `).join('') || `<div class="chart-empty" style="height:60px">No hands in this window</div>`;
+      const seatSizes = Array.from(new Set((p.ranked.places || []).map(x => x.seats))).sort();
+      const placeBars = seatSizes.map(seats => `
+        <div class="chart-subhead">${seats}-player tables</div>
+        ${chartShareBar(p.ranked.places.filter(x => x.seats === seats).map(x => ({ label: `${x.placement}${['st', 'nd', 'rd'][x.placement - 1] || 'th'}`, value: x.count, color: CHART_SERIES[(x.placement - 1) % CHART_SERIES.length] })))}
+      `).join('') || `<div class="chart-empty" style="height:60px">No ranked games in this window</div>`;
+      const t = p.tourney;
+      const bots = p.botsVsPlayers || [];
+      const listRow = r => [r.username || String(r.userId).slice(0, 8), chartDuration(r.tableSec), r.games, r.hands, chartSigned(r.netChips)];
+      const moneyRow = r => [r.username || String(r.userId).slice(0, 8), chartSigned(r.netChips), chartSigned(r.casual), chartSigned(r.ranked), chartSigned(r.tourney)];
+
+      root.innerHTML = `
+        ${totalsNote(data.source)}
+        <div class="kpi-grid">
+          ${statTile({ label: 'Games played', value: games, delta: deltaBadge(games, prev.games), sub: PLAY_MODES.map(m => `${MODE_LABELS[m]} ${p.games[m].games}`).join(' · '), spark: chartSparkline(gameTotals) })}
+          ${statTile({ label: 'Hands played', value: playerHands, delta: deltaBadge(playerHands, prev.playerHands), sub: 'Each player’s hands, every mode', spark: chartSparkline(p.series.hands) })}
+          ${statTile({ label: 'Players who played', value: p.players, delta: deltaBadge(p.players, prev.players) })}
+          ${statTile({ label: 'Median game', value: chartDurationShort(p.lengths.all.medianSec), delta: deltaBadge(p.lengths.all.medianSec, prev.medianGameSec, { kind: 'duration', better: null }), sub: `${p.lengths.all.count} game${p.lengths.all.count === 1 ? '' : 's'} ended` })}
+          ${statTile({ label: 'Time at tables', value: chartDurationShort(p.tableTime.medianSecPerPlayer), delta: deltaBadge(p.tableTime.medianSecPerPlayer, prev.medianSecPerPlayer, { kind: 'duration' }), sub: `Median per player · ${chartDuration(p.tableTime.totalSec)} in all` })}
+          ${statTile({ label: 'Hands won', value: won, delta: deltaBadge(won, prev.handsWon, { better: null }), sub: playerHands > 0 ? `${Math.round((won / playerHands) * 1000) / 10}% of players’ hands` : 'No hands' })}
+        </div>
+        ${qualityTiles}
+
+        ${panelCard(`Games per ${per}`, `Casual seatings, ranked games and tourney entries by real players, ${windowLabel()}, in your time zone. A game counts when it starts.`, `
+          ${chartColumns({ buckets: p.buckets, series: gameSeries, emptyText: `No games in the ${windowLabel()}` })}
+          ${chartLegend(gameSeries)}
+          ${chartDataTable(['When', ...gameSeries.map(x => x.label), 'Total'], bucketRows(p.buckets, [...gameSeries.map(x => x.values), gameTotals]))}
+        `)}
+
+        ${panelCard(`Hands per ${per}`, `Hands completed by mode, ${windowLabel()}, in your time zone.`, handsBody)}
+
+        <div class="grid-2">
+          ${panelCard('How long a game lasts', `Games that ended in the window. Casual: a seating, from its buy-in to the seat’s end (a busted seat at its last hand). Ranked and tourney: the table. Median ${lengthMedians || 'none yet'}.`,
+            histogramBody(p.lengths.all.histogram, { format: chartDurationShort, emptyText: 'No games ended in this window', binHeader: 'Length', unitHeader: 'Games', unitLabel: 'games' }))}
+          ${panelCard('How long people play', `Time at tables per player per day (median ${chartDuration(p.tableTime.p50)} over ${p.tableTime.playerDays} player-day${p.tableTime.playerDays === 1 ? '' : 's'}), and how long the app stays open.`, `
+            <div class="chart-subhead">Time at tables, per player per day</div>
+            ${histogramBody(p.tableTime.histogram, { format: chartDurationShort, emptyText: 'Nobody at a table in this window', binHeader: 'Time', unitHeader: 'Player-days', unitLabel: 'player-days' })}
+            <div class="chart-subhead">App sessions · median ${escapeHtml(chartDuration(p.appSessions.medianSec))} over ${p.appSessions.count}</div>
+            ${histogramBody(p.appSessions.histogram, { format: chartDurationShort, emptyText: 'No sessions in this window', binHeader: 'Length', unitHeader: 'Sessions', unitLabel: 'sessions' })}
+          `)}
+        </div>
+
+        <div class="grid-2">
+          ${panelCard('Winning and losing', 'Each player’s hands by how they ended, and the chips a player won or lost per hand (net of the bet).', `
+            ${outcomeBars}
+            <div class="chart-subhead">Net chips per hand</div>
+            ${histogramBody(p.netPerHand, { integer: true, emptyText: 'No hands in this window', binHeader: 'Net chips', unitHeader: 'Hands', unitLabel: 'hands' })}
+          `)}
+          ${panelCard('Ranked places, MMR and tourneys', 'Where real players finished, the MMR each finished game moved, and the tourneys’ places and prizes.', `
+            ${placeBars}
+            <div class="chart-subhead">MMR change per game · median ${escapeHtml(chartSigned(p.ranked.mmrChange.median ?? 0))} over ${p.ranked.mmrChange.count}</div>
+            ${histogramBody(p.ranked.mmrChange.histogram, { integer: true, emptyText: 'No finished ranked games in this window', binHeader: 'MMR', unitHeader: 'Games', unitLabel: 'games' })}
+            <div class="chart-subhead">Tourneys · ${t.entries} entr${t.entries === 1 ? 'y' : 'ies'}, ${t.finished} finished</div>
+            ${chartHBars((t.places || []).map(x => ({
+              label: `${x.placement}${['st', 'nd', 'rd'][x.placement - 1] || 'th'} place`,
+              value: x.count,
+              valueText: `${x.count} · ${x.tokens} token${x.tokens === 1 ? '' : 's'}`,
+              color: CHART_COLORS.tourney,
+            })), { emptyText: 'No tourney places in this window' })}
+            <div class="kpi-sub" style="margin-top:8px;">Entries cost ${escapeHtml(chartCompact(t.costChips))} chips; prizes paid ${t.prizeTokens} token${t.prizeTokens === 1 ? '' : 's'} and ${escapeHtml(chartCompact(t.prizeChips))} chips; ${t.entriesReturned} entr${t.entriesReturned === 1 ? 'y' : 'ies'} given back.</div>
+          `)}
+        </div>
+
+        ${panelCard('Players against the house', `Real players’ net chips at the tables per ${per}: below zero the house won (bots, the ranked rake, and players not counted here). A seat still open counts its buy-in until it ends. In the window: ${PLAY_MODES.map(m => `${MODE_LABELS[m]} ${chartSigned(p.house[m].net)}`).join(' · ')} · net ${chartSigned(houseNet)}.`, `
+          ${chartDiverging({ buckets: p.buckets, series: houseSeries, emptyText: `No table chips moved in the ${windowLabel()}` })}
+          ${chartLegend(houseSeries)}
+          ${chartDataTable(['When', ...houseSeries.map(x => x.label), 'Net'], bucketRows(p.buckets, [...houseSeries.map(x => x.values), p.buckets.starts.map((_, i) => houseSeries.reduce((a, x) => a + Number(x.values[i] || 0), 0))]))}
+        `)}
+
+        ${panelCard('Against bots, by stake', 'Casual hands where the player was the only human dealt in (the A2 report). Big blinds won per 100 hands, with its 95% range: a few hundred hands carry about ±60 bb/100 of noise, so read the range before the number.', miniTable(
+          ['Stake', 'Bots', 'Hands', 'Players up / down', 'bb/100', '± 95%', 'Net chips', 'Hands won'],
+          bots.map(b => [
+            `${b.name || capitalize(b.stake)} ${b.smallBlind}/${b.bigBlind}`,
+            capitalize(b.botDifficulty),
+            chartCompact(b.hands),
+            `${b.playersUp} / ${b.playersDown} of ${b.players}`,
+            chartSigned(b.bbPer100),
+            b.ci95 == null ? '–' : `±${b.ci95}`,
+            chartSigned(b.netChips),
+            `${b.handsWonPct}%`,
+          ]),
+          [2, 4, 5, 6, 7],
+        ))}
+
+        ${queueCards}
+
+        <div class="grid-2">
+          ${panelCard('Most time at tables', 'Real players by their time at tables in the window, with their games, hands and net chips.', miniTable(['Player', 'Time', 'Games', 'Hands', 'Net chips'], p.lists.mostActive.map(listRow), [1, 2, 3, 4]))}
+          ${panelCard('Biggest winners and losers', 'Net chips from casual, ranked and tourney tables in the window.', `
+            <div class="chart-subhead">Winners</div>
+            ${miniTable(['Player', 'Net', 'Casual', 'Ranked', 'Tourney'], p.lists.winners.map(moneyRow), [1, 2, 3, 4])}
+            <div class="chart-subhead">Losers</div>
+            ${miniTable(['Player', 'Net', 'Casual', 'Ranked', 'Tourney'], p.lists.losers.map(moneyRow), [1, 2, 3, 4])}
+          `)}
         </div>
       `;
     }
 
-    // The store as the apps report it, until the server's chip and money totals land (phase 3).
+    // Economy (plan D9): where chips come from and go, real money at list price (Q2 a), tokens and
+    // balances, from the server's totals (cortex-admin `economy`, MinamoPokerBE 1.89.0; the demo
+    // draws its own). The store events the apps send stay at the bottom.
+    const ECONOMY_SERIES = [
+      { key: 'spins', label: 'Spins', color: CHART_SERIES[3], flows: ['spins'] },
+      { key: 'bought', label: 'Bought chips', color: CHART_SERIES[4], flows: ['purchased'] },
+      { key: 'grants', label: 'Sign-ups, bonuses, grants', color: CHART_SERIES[6], flows: ['signup', 'bonus', 'admin'] },
+      { key: 'casual', label: 'Casual tables', color: CHART_COLORS.casual, flows: ['casual'] },
+      { key: 'ranked', label: 'Ranked tables', color: CHART_COLORS.ranked, flows: ['ranked'] },
+      { key: 'tourney', label: 'Tourneys', color: CHART_COLORS.tourney, flows: ['tourney'] },
+      { key: 'store', label: 'Store', color: CHART_SERIES[7], flows: ['store_skins', 'store_sets', 'store_parts', 'store_collections'] },
+      { key: 'other', label: 'Other', color: CHART_COLORS.other, flows: ['other'] },
+    ];
+    const STORE_KINDS = [
+      { key: 'skins', label: 'Frames and tables', flow: 'store_skins' },
+      { key: 'sets', label: 'Sets', flow: 'store_sets' },
+      { key: 'parts', label: 'Parts', flow: 'store_parts' },
+      { key: 'collections', label: 'Collections', flow: 'store_collections' },
+    ];
+    const TOKEN_EARNED = ['win', 'prize', 'refund', 'admin_adjustment', 'account_merge', 'debug_grant'];
+
     function renderEconomy(root, data) {
       const showroom = (data.characterShowroom || []).filter(c => c.previews > 0 || c.purchases > 0 || c.abandons > 0);
       const insights = data.tableInsights || {};
       const total = key => showroom.reduce((a, c) => a + (Number(c[key]) || 0), 0);
       const previews = total('previews');
       const purchases = total('purchases');
-      root.innerHTML = `
-        ${totalsNote(data.source)}
-        <div class="panel-card">
-          <div class="panel-title">Chips and money come next</div>
-          <div class="panel-subtitle">Chips won and lost at tables, spins, chip and token buys, and store spend at list price in USD, per day, need new server totals (phase 3 of the Cortex redesign). Until then this tab shows what the apps report from the store.</div>
-        </div>
-
+      const storeEvents = `
         <div class="kpi-grid">
-          ${statTile({ label: 'Store previews', value: previews, sub: capitalize(windowLabel()) })}
+          ${statTile({ label: 'Store previews', value: previews, sub: 'What the apps report' })}
           ${statTile({ label: 'Purchases', value: purchases, sub: previews > 0 ? `${Math.round((purchases / previews) * 1000) / 10}% of previews` : 'No previews' })}
           ${statTile({ label: 'Purchases abandoned', value: insights.purchaseAbandonedCount || 0, sub: 'Opened and backed out' })}
           ${statTile({ label: 'Out of chips', value: insights.insufficientFundsCount || 0, sub: 'A buy-in or store tap blocked by a low balance' })}
         </div>
-
-        ${panelCard('Store by character', `Previews of each character’s items and what was bought, ${windowLabel()}.`, chartHBars(showroom.map(c => ({
+        ${panelCard('Store by character', `Previews of each character’s items and what was bought, ${windowLabel()}, as the apps report them.`, chartHBars(showroom.map(c => ({
           label: capitalize(c.characterId),
           value: c.previews,
           valueText: `${c.previews} preview${c.previews === 1 ? '' : 's'} · ${c.purchases} bought`,
           sub: `${c.conversionPct}% preview to buy · ${c.abandons} abandoned`,
         })), { emptyText: 'No store previews in this window' }))}
+      `;
+      const e = data.totals;
+      if (!e) {
+        root.innerHTML = `${totalsNote(data.source)}${totalsMissingCard(data.totalsSource, 'economy')}${storeEvents}`;
+        return;
+      }
+
+      const per = e.buckets.unit === 'day' ? 'day' : 'hour';
+      const prev = e.previous || {};
+      const n = e.buckets.starts.length;
+      const flowOf = name => (e.flows || []).find(f => f.flow === name);
+      const seriesOf = names => Array.from({ length: n }, (_, i) => names.reduce((a, name) => a + Number(flowOf(name)?.series?.[i] || 0), 0));
+      const flowSeries = ECONOMY_SERIES.map(x => ({ label: x.label, color: x.color, values: seriesOf(x.flows) }))
+        .filter(x => x.values.some(v => v !== 0));
+      const flowTotal = names => names.reduce((a, name) => a + Number(flowOf(name)?.amount || 0), 0);
+      const transfer = flowTotal(['transfer']);
+      const m = e.money;
+      const moneySeries = [
+        { label: 'iOS', color: CHART_COLORS.ios, values: m.series.ios.map(Number) },
+        { label: 'Android', color: CHART_COLORS.android, values: m.series.android.map(Number) },
+      ];
+      const kinds = STORE_KINDS.map((k, i) => ({ label: k.label, value: -flowTotal([k.flow]), color: CHART_SERIES[i] }));
+      const tokenTypes = Array.from(new Set((e.tokens || []).map(x => x.tokenType))).sort();
+      const tokenRows = tokenTypes.map(type => {
+        const rows = e.tokens.filter(x => x.tokenType === type);
+        const sumOf = keep => rows.filter(keep).reduce((a, x) => a + Number(x.amount), 0);
+        return [
+          capitalize(type),
+          sumOf(x => TOKEN_EARNED.includes(x.reason) && x.amount > 0),
+          -sumOf(x => x.reason === 'purchase'),
+          -sumOf(x => x.reason === 'exchange' && x.amount < 0),
+          sumOf(x => x.reason === 'exchange' && x.amount > 0),
+        ];
+      });
+      const w = e.wealth;
+      const d = e.perPlayerDay;
+      const payingShare = e.totals.activePlayers > 0 ? `${Math.round((m.buyers / e.totals.activePlayers) * 1000) / 10}%` : '–';
+
+      root.innerHTML = `
+        ${totalsNote(data.source)}
+        ${state.platform !== 'all' ? '<div class="totals-note">Chips are counted on every platform (a player’s ledger has none); the platform picks only the purchases’ store below.</div>' : ''}
+        <div class="kpi-grid">
+          ${statTile({ label: 'Chips created', value: chartCompact(e.totals.created), delta: deltaBadge(e.totals.created, prev.created, { better: null }), sub: 'Spins, bought chips, sign-ups, bonuses, grants, and what players won at tables' })}
+          ${statTile({ label: 'Chips removed', value: chartCompact(e.totals.removed), delta: deltaBadge(e.totals.removed, prev.removed, { better: null }), sub: 'The store, and what players lost at tables' })}
+          ${statTile({ label: 'Players’ chips, net', value: chartSigned(e.totals.net), delta: deltaBadge(e.totals.net, prev.net, { better: null }), sub: `${e.totals.activePlayers} player${e.totals.activePlayers === 1 ? '' : 's'} moved chips · ${e.totals.newAccounts} new account${e.totals.newAccounts === 1 ? '' : 's'}` })}
+          ${statTile({ label: 'Revenue at list price', value: chartUsd(m.revenueUsd), delta: deltaBadge(Number(m.revenueUsd), prev.revenueUsd, { kind: 'usd' }), sub: `${m.purchases} purchase${m.purchases === 1 ? '' : 's'} · ${m.buyers} paying player${m.buyers === 1 ? '' : 's'}` })}
+        </div>
+
+        ${panelCard('Where chips came from and went', `Per ${per}, ${windowLabel()}, in your time zone: above zero what was created, below what was removed; the tick is the net. Table rows net to what real players won or lost there; a seat still open counts its buy-in until it ends.${transfer ? ` Merged guests’ balances (${chartCompact(transfer)}) are left out.` : ''}`, `
+          ${chartDiverging({ buckets: e.buckets, series: flowSeries, height: 200, emptyText: `No chips moved in the ${windowLabel()}` })}
+          ${chartLegend(flowSeries)}
+          ${chartDataTable(['When', ...flowSeries.map(x => x.label), 'Net'], bucketRows(e.buckets, [...flowSeries.map(x => x.values), e.buckets.starts.map((_, i) => flowSeries.reduce((a, x) => a + Number(x.values[i] || 0), 0))]))}
+        `)}
+
+        <div class="grid-2">
+          ${panelCard('Real money', `List price in USD before Apple’s and Google’s fees (no currency or fee is stored). Paying players: ${m.buyers} of the ${e.totals.activePlayers} who moved chips (${payingShare}).`, `
+            ${chartColumns({ buckets: e.buckets, series: moneySeries, emptyText: `No purchases in the ${windowLabel()}`, unitLabel: 'USD' })}
+            ${chartLegend(moneySeries)}
+            <div class="chart-subhead">By chip pack</div>
+            ${chartHBars((m.byProduct || []).map(x => ({
+              label: `${x.name} · ${chartUsd(x.priceUsd)}`,
+              value: Number(x.revenueUsd),
+              valueText: `${chartUsd(x.revenueUsd)} · ${x.purchases} bought`,
+              sub: `${x.buyers} buyer${x.buyers === 1 ? '' : 's'}`,
+              color: CHART_COLORS.accent,
+            })), { emptyText: 'No chip packs bought in this window' })}
+            <div class="kpi-sub" style="margin-top:8px;">${m.refunds ? `${m.refunds} refunded (${escapeHtml(chartUsd(m.refundedUsd))}), taken out. ` : ''}${m.hiddenTestPurchases ? `${m.hiddenTestPurchases} sandbox, TestFlight, Xcode or team purchase${m.hiddenTestPurchases === 1 ? '' : 's'} hidden.` : ''}</div>
+            ${chartDataTable(['When', 'iOS', 'Android', 'Purchases'], bucketRows(e.buckets, [moneySeries[0].values.map(chartUsd), moneySeries[1].values.map(chartUsd), m.series.purchases]))}
+          `)}
+          ${panelCard('Store spending', `${chartCompact(e.store.spent)} chips in ${e.store.purchases} purchase${e.store.purchases === 1 ? '' : 's'} by ${e.store.buyers} player${e.store.buyers === 1 ? '' : 's'}.`, `
+            ${chartShareBar(kinds, { emptyText: 'Nothing bought in this window' })}
+            <div class="chart-subhead">Bought most</div>
+            ${chartHBars((e.store.items || []).slice(0, 8).map(x => ({
+              label: x.item,
+              value: Number(x.chips),
+              valueText: `${chartCompact(x.chips)} chips · ${x.count}`,
+              sub: `${(STORE_KINDS.find(k => k.key === x.kind) || { label: x.kind }).label} · ${x.buyers} buyer${x.buyers === 1 ? '' : 's'}`,
+              color: CHART_SERIES[Math.max(0, STORE_KINDS.findIndex(k => k.key === x.kind)) % CHART_SERIES.length],
+            })), { emptyText: 'Nothing bought in this window' })}
+          `)}
+        </div>
+
+        <div class="grid-2">
+          ${panelCard('Tokens', 'Per suit: earned from tourney places (and refunds, grants and merges), spent in the store, and traded three for one.', miniTable(['Suit', 'Earned', 'Spent', 'Traded away', 'Traded for'], tokenRows, [1, 2, 3, 4]))}
+          ${panelCard('Balances', `Chips held now by the ${w.players} player${w.players === 1 ? '' : 's'} who moved chips in the window. Median ${chartCompact(w.median ?? 0)}; ${w.underCheapestBuyIn} under the cheapest buy-in (${chartCompact(w.cheapestBuyIn ?? 0)}).`,
+            histogramBody(w.histogram, { emptyText: 'No balances in this window', binHeader: 'Chips held', unitHeader: 'Players', unitLabel: 'players' }))}
+        </div>
+
+        ${panelCard('A player’s day', `Each player’s net chips per day from play and spins (store spending, bought chips, grants and merges left out), over ${d.playerDays} player-day${d.playerDays === 1 ? '' : 's'}.`, `
+          <div class="kpi-grid" style="margin-bottom:0;">
+            ${statTile({ label: 'Median day', value: chartSigned(d.p50 ?? 0), sub: `${d.up} day${d.up === 1 ? '' : 's'} up · ${d.down} down` })}
+            ${statTile({ label: 'Middle half', value: `${chartSigned(d.p25 ?? 0)} to ${chartSigned(d.p75 ?? 0)}`, sub: 'The 25th to the 75th percentile' })}
+            ${statTile({ label: 'One day in ten', value: `${chartSigned(d.p10 ?? 0)} / ${chartSigned(d.p90 ?? 0)}`, sub: 'Worse than the first, better than the second' })}
+            ${statTile({ label: 'Tables only', value: chartSigned(d.tables.p50 ?? 0), sub: `Median · middle half ${chartSigned(d.tables.p25 ?? 0)} to ${chartSigned(d.tables.p75 ?? 0)}` })}
+          </div>
+        `)}
+
+        ${storeEvents}
       `;
     }
 
@@ -4503,6 +5314,7 @@
         });
         state.edgeSnapCache = null;
         state.edgeActivityCache = null;
+        state.edgeTotalsCache = null;
       } else {
         await fetch(`/api/triage/${issueId}/status`, {
           method: 'POST',
@@ -4531,6 +5343,7 @@
         });
         state.edgeSnapCache = null;
         state.edgeActivityCache = null;
+        state.edgeTotalsCache = null;
       } else {
         await fetch(`/api/inbox/${reportId}/status`, {
           method: 'POST',
@@ -4552,6 +5365,7 @@
         if (state.dataSource === 'edge' || state.environment === 'demo') {
           state.edgeSnapCache = null;
           state.edgeActivityCache = null;
+          state.edgeTotalsCache = null;
           await loadVersions();
           await refreshActiveTab();
           if (state.edgeLastError) {
@@ -4785,6 +5599,7 @@
         state.windowHours = hours;
         state.edgeSnapCache = null;
         state.edgeActivityCache = null;
+        state.edgeTotalsCache = null;
         updateHeader();
         document.getElementById('viewRoot').classList.add('refreshing');
         await loadVersions();
@@ -4836,6 +5651,7 @@
             localStorage.removeItem('cortex_owner_key');
             state.edgeSnapCache = null;
             state.edgeActivityCache = null;
+            state.edgeTotalsCache = null;
             state.edgeLastError = null;
             setPortalUnlocked(false);
           };
