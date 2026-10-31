@@ -2287,7 +2287,8 @@
     // Active players per bucket by platform (a player counts once per bucket and platform; players
     // counts them once across platforms), and per bucket the sessions started, the crashed ones and
     // their summed length, from session rows (started_at). The buckets travel with the series.
-    function chartActivitySeries(sessions, buckets) {
+    // playerOf names a session's player (activity.js passes its people rule).
+    function chartActivitySeries(sessions, buckets, playerOf = (s) => s.user_id || s.install_id || s.session_id) {
       const n = buckets.starts.length;
       const sets = { ios: [], android: [], other: [], players: [] };
       for (const key of Object.keys(sets)) sets[key] = Array.from({ length: n }, () => new Set());
@@ -2301,7 +2302,7 @@
         if (s.status === 'crashed') crashed[i]++;
         durationMs[i] += Number(s.duration_ms) || 0;
         const key = s.platform === 'ios' || s.platform === 'android' ? s.platform : 'other';
-        const player = s.user_id || s.install_id || s.session_id;
+        const player = playerOf(s);
         sets[key][i].add(player);
         sets.players[i].add(player);
       }
@@ -2636,6 +2637,52 @@
       return Math.round(sorted[Math.min(sorted.length - 1, Math.floor((p * sorted.length) / 100))]);
     }
 
+    // Ids that tie no rows together: none, an unknown install, the local sync's stand-ins.
+    const ACTIVITY_LOOSE_IDS = ['', 'unknown', 'sync-session', 'sync-install'];
+
+    // People (owner, 2026-10-31), as get_cortex_activity counts them. The apps send a launch's first
+    // rows before the sign-in, with the install id only, so a row without a user id counts as the user
+    // its install signed into within these rows: the install's next signed-in row at or after it, else
+    // its last one before (a guest, then the account it linked: each launch goes to the account it
+    // signed into next); a row the first key ties to nobody tries the next key (an event's session) by
+    // the same rule. Order: the time, a row without a user before one with, then the user id. items:
+    // { t, uid }; answers a Map from each item it ties to its user id.
+    function activityPeople(items, keys) {
+      const found = new Map();
+      for (const keyOf of keys) {
+        const groups = new Map();
+        for (const it of items) {
+          const key = keyOf(it);
+          if (key == null || ACTIVITY_LOOSE_IDS.includes(key)) continue;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(it);
+        }
+        for (const list of groups.values()) {
+          list.sort((a, b) => a.t - b.t || (a.uid ? 1 : 0) - (b.uid ? 1 : 0) || activityCompare(a.uid, b.uid));
+          const next = new Array(list.length);
+          let user = '';
+          for (let i = list.length - 1; i >= 0; i--) {
+            if (list[i].uid) user = list[i].uid;
+            next[i] = user;
+          }
+          user = '';
+          for (let i = 0; i < list.length; i++) {
+            if (list[i].uid) user = list[i].uid;
+            else if (!found.has(list[i]) && (next[i] || user)) found.set(list[i], next[i] || user);
+          }
+        }
+      }
+      return found;
+    }
+
+    // Each session's person: its user, else its install's (activityPeople), else the install, else
+    // the session. One map per window.
+    function activitySessionPeople(sessions) {
+      const items = sessions.map((s) => ({ s, t: activityTime(s.started_at), uid: s.user_id ? String(s.user_id) : '' }));
+      const tied = activityPeople(items, [(it) => it.s.install_id]);
+      return new Map(items.map((it) => [it.s, it.uid || tied.get(it) || it.s.install_id || it.s.session_id]));
+    }
+
     /**
      * The activity totals from rows already narrowed to one environment, the window and the test-traffic
      * rule (the snapshot's, the demo's or the local store's). Platform and version narrow them here, as
@@ -2652,10 +2699,12 @@
       const buckets = chartTimeBuckets(hours, nowMs);
       const timeZone = options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-      // Sessions: the platform's rows for the version list; the version's for everything else.
+      // Sessions: the platform's rows for the version list; the version's for everything else. People
+      // are mapped over every version, then narrowed.
       const vis = (rows.sessions || []).filter((s) => activityTime(s.started_at) >= cutoff && onPlatform(s));
       const cur = vis.filter(onVersion);
-      const actorOf = (s) => (s.user_id ? String(s.user_id) : '') || s.install_id || s.session_id;
+      const people = activitySessionPeople(vis);
+      const actorOf = (s) => people.get(s);
       const byVersionMap = new Map();
       for (const s of vis) {
         const key = `${s.platform}\u0000${s.app_version}`;
@@ -2672,7 +2721,7 @@
       const byVersion = Array.from(byVersionMap.values())
         .map((v) => ({ ...v, players: v.players.size }))
         .sort((a, b) => activityCompare(b.appVersion, a.appVersion) || b.sessions - a.sessions || activityCompare(a.platform, b.platform));
-      const { buckets: _sessionBuckets, ...series } = chartActivitySeries(cur, buckets);
+      const { buckets: _sessionBuckets, ...series } = chartActivitySeries(cur, buckets, actorOf);
       const sessions = {
         total: cur.length,
         crashed: cur.filter((s) => s.status === 'crashed').length,
@@ -2719,23 +2768,27 @@
         };
       }).sort((a, b) => b.count - a.count || activityCompare(a.name, b.name));
 
-      const events = activityEvents((rows.productEvents || []).filter((e) => activityTime(e.event_ts) >= cutoff && onPlatform(e) && onVersion(e)), buckets);
+      const events = activityEvents((rows.productEvents || []).filter((e) => activityTime(e.event_ts) >= cutoff && onPlatform(e)), onVersion, buckets);
 
       // The window before, of the same length, for the headline changes (plan D2): only when the rows
-      // reach back that far (options.previous), else null and the portal shows no change.
+      // reach back that far (options.previous), else null and the portal shows no change. Its people
+      // are mapped over its own rows.
       let previous = null;
       if (options.previous) {
-        const before = (rows.sessions || []).filter((s) => {
+        const beforeAll = (rows.sessions || []).filter((s) => {
           const t = activityTime(s.started_at);
-          return t >= cutoff - hours * 3600000 && t < cutoff && onPlatform(s) && onVersion(s);
+          return t >= cutoff - hours * 3600000 && t < cutoff && onPlatform(s);
         });
+        const beforePeople = activitySessionPeople(beforeAll);
+        const before = beforeAll.filter(onVersion);
+        const personOf = (s) => beforePeople.get(s);
         previous = {
           sessions: {
             total: before.length,
             crashed: before.filter((s) => s.status === 'crashed').length,
             errored: before.filter((s) => Number(s.errors_count) > 0).length,
-            players: new Set(before.map(actorOf)).size,
-            crashedPlayers: new Set(before.filter((s) => s.status === 'crashed').map(actorOf)).size,
+            players: new Set(before.map(personOf)).size,
+            crashedPlayers: new Set(before.filter((s) => s.status === 'crashed').map(personOf)).size,
             durationMsSum: before.reduce((a, s) => a + (Number(s.duration_ms) || 0), 0),
           },
         };
@@ -2761,7 +2814,13 @@
 
     // Product events: the journey, the home panels, the tables left and why, hands per session and per
     // bucket, character and set events by their raw ids, the queue events themselves and the counts.
-    function activityEvents(rows, buckets) {
+    // People are mapped over the window's every version (the install's user, then the session's), then
+    // the version narrows the rows.
+    function activityEvents(windowRows, onVersion, buckets) {
+      const tagged = windowRows.map((r) => ({ r, t: activityTime(r.event_ts), uid: r.user_id ? String(r.user_id) : '' }));
+      const tied = activityPeople(tagged, [(it) => it.r.install_id, (it) => it.r.session_id]);
+      const personOf = new Map(tagged.map((it) => [it.r, it.uid || tied.get(it) || '']));
+      const rows = windowRows.filter(onVersion);
       const ev = rows.map((r) => {
         const p = activityProps(r);
         const rawMode = String(p.mode ?? 'casual').toLowerCase();
@@ -2770,7 +2829,7 @@
           name: r.name,
           p,
           userId: r.user_id ? String(r.user_id) : '',
-          actor: (r.user_id ? String(r.user_id) : '') || r.install_id || r.session_id || 'anon',
+          actor: personOf.get(r) || r.install_id || r.session_id || 'anon',
           sk: r.session_id || (r.user_id ? String(r.user_id) : '') || r.install_id || 'anon',
           hands: activityNumber(p.handsPlayed ?? p.hands_played),
           dwell: activityNumber(p.dwellMs ?? p.dwell_ms),
